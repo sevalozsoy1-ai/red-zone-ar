@@ -1,0 +1,24 @@
+kind = "mobile"
+previewPath = "/"
+title = "Ephesus AR Savaş Oyunu"
+description = "Ephesus Medya için geliştirilmiş, gerçek dünya kamerası üzerinde taktik çatışma deneyimi sunan çok dilli mobil AR savaş oyunu. İzin akışı, ülke seçimi, oyun HUD'ı, silahlar, kredi ve ayarlar ile oynanabilir ilk sürümü içerir."
+version = "1.0.0"
+id = "artifacts/ephesus-ar"
+router = "expo-domain"
+
+[[services]]
+name = "expo"
+ensurePreviewReachable = "/status"
+paths = [ "/" ]
+localPort = 23363
+
+[services.development]
+run = "pnpm --filter @workspace/ephesus-ar run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/ephesus-ar", "run", "build" ]
+run = [ "pnpm", "--filter", "@workspace/ephesus-ar", "run", "serve" ]
+
+[services.env]
+PORT = "23363"
+BASE_PATH = "/"

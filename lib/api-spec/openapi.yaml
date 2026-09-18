@@ -1,0 +1,246 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: battle
+    description: Team camera battle operations
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /battle/rooms:
+    post:
+      operationId: createBattleRoom
+      tags: [battle]
+      summary: Create a battle room
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BattleJoinInput"
+      responses:
+        "201":
+          description: Room created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BattleSession"
+  /battle/rooms/{code}/players:
+    post:
+      operationId: joinBattleRoom
+      tags: [battle]
+      summary: Join a battle room
+      parameters:
+        - $ref: "#/components/parameters/RoomCode"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BattleJoinInput"
+      responses:
+        "200":
+          description: Joined room
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BattleSession"
+  /battle/state:
+    get:
+      operationId: getBattleState
+      tags: [battle]
+      summary: Get current room state
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Z0-9]{6}$"
+      responses:
+        "200":
+          description: Current room
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BattleSession"
+  /battle/rooms/{code}/start:
+    post:
+      operationId: startBattleRoom
+      tags: [battle]
+      summary: Start a battle
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RoomCode"
+      responses:
+        "200":
+          description: Battle started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BattleSession"
+  /battle/rooms/{code}/session:
+    delete:
+      operationId: leaveBattleRoom
+      tags: [battle]
+      summary: Leave a battle room
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RoomCode"
+      responses:
+        "204":
+          description: Session left
+  /battle/rooms/{code}/heartbeat:
+    post:
+      operationId: heartbeatBattleRoom
+      tags: [battle]
+      summary: Renew a battle session lease
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RoomCode"
+      responses:
+        "200":
+          description: Renewed battle session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BattleSession"
+  /battle/rooms/{code}/shots:
+    post:
+      operationId: fireBattleShot
+      tags: [battle]
+      summary: Submit a camera-confirmed shot
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RoomCode"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BattleShotInput"
+      responses:
+        "200":
+          description: Server-verified shot result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BattleShotResult"
+components:
+  parameters:
+    RoomCode:
+      name: code
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[A-Z0-9]{6}$"
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+    BattleJoinInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 18 }
+    BattleAccessInput:
+      type: object
+      properties: {}
+    BattleShotInput:
+      type: object
+      required: [markerId, firedAt, weaponId, fireMode]
+      properties:
+        markerId: { type: integer, minimum: 0, maximum: 9 }
+        firedAt: { type: integer }
+        weaponId: { type: string, minLength: 1, maxLength: 32 }
+        fireMode: { type: string, enum: [primary, throw] }
+    BattleEffect:
+      type: object
+      required: [id, kind, expiresAt]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [frag, flashbang, smoke] }
+        expiresAt: { type: integer }
+    BattlePlayer:
+      type: object
+      required: [id, name, markerId, markerColor, lives, hp, alive, respawnAt, isHost, connected]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        markerId: { type: integer }
+        markerColor: { type: string }
+        lives: { type: integer }
+        hp: { type: integer, minimum: 0, maximum: 100 }
+        alive: { type: boolean }
+        respawnAt: { type: integer }
+        isHost: { type: boolean }
+        connected: { type: boolean }
+    BattleRoom:
+      type: object
+      required: [code, status, winnerPlayerId, draw, players, effects, maxPlayers, updatedAt]
+      properties:
+        code: { type: string }
+        status: { type: string, enum: [lobby, active, finished] }
+        winnerPlayerId: { type: string, nullable: true }
+        draw: { type: boolean }
+        players:
+          type: array
+          items: { $ref: "#/components/schemas/BattlePlayer" }
+        effects:
+          type: array
+          items: { $ref: "#/components/schemas/BattleEffect" }
+        maxPlayers: { type: integer }
+        updatedAt: { type: integer }
+    BattleSession:
+      type: object
+      required: [playerId, sessionToken, room]
+      properties:
+        playerId: { type: string }
+        sessionToken: { type: string }
+        room: { $ref: "#/components/schemas/BattleRoom" }
+    BattleShotResult:
+      type: object
+      required: [accepted, reason, shooterId, targetId, damage, eliminated, room]
+      properties:
+        accepted: { type: boolean }
+        reason: { type: string }
+        shooterId: { type: string }
+        targetId: { type: string }
+        damage: { type: integer, minimum: 0 }
+        eliminated: { type: boolean }
+        room: { $ref: "#/components/schemas/BattleRoom" }
+

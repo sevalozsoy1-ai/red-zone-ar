@@ -1,0 +1,12 @@
+- [Mobile input verification](mobile-input-verification.md) — concurrent aim/fire needs independent touch ownership; browser synthetic input is not physical-device proof.
+- [Audio activation](audio-activation.md) — unlock the audio engine without muting or pausing players used by the same first gesture.
+- [Generated cutout transparency](generated-cutout-transparency.md) — visually verify generated PNG alpha; a requested transparent background may be baked in as checkerboard pixels.
+- [Camera battle trust boundary](camera-battle-trust.md) — authenticate the shooter and keep game state authoritative; treat on-device marker detection as a sensor signal.
+- [Camera preview quality](camera-preview-quality.md) — check Expo focus semantics and avoid maximum-resolution still capture loops competing with live preview.
+- [Localization verification](localization-verification.md) — key parity is not semantic coverage; verify real labels and both fresh/returning startup.
+- [Android build environment](android-build-environment.md) — local native builds can hit workspace quota and Gradle/NDK daemon limits even when Expo export passes.
+- [EAS cloud builds](eas-cloud-builds.md) — cloud APKs need a linked Expo project, a connected source repository, and an explicit HTTPS API URL in the EAS environment.
+- [Battle durability constraints](battle-durability.md) — atomic cross-instance updates and durable lease timestamps must survive failures without false disconnects.
+- [Android 16 KB ABI selection](android-16kb-abi.md) — React Native builds need both architecture property and NDK filters to omit incompatible 32-bit native libraries.
+- [Android scope overlay safety](android-scope-overlay.md) — keep camera overlays viewport-sized; oversized off-screen SVG surfaces can crash Android on scope mount.
+- [Presence deadline ordering](presence-deadline-ordering.md) — resolve different departure deadlines chronologically so delayed timers cannot change the winner.

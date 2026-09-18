@@ -1,0 +1,65 @@
+{
+  "expo": {
+    "name": "Red Zone AR",
+    "slug": "ephesus-ar",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/red-zone-ar-icon.png",
+    "scheme": "red-zone-ar",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": false
+    },
+    "android": {
+      "package": "com.ephesusmedya.redzonear",
+      "versionCode": 1,
+      "allowBackup": false,
+      "blockedPermissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ],
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/images/red-zone-ar-icon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "./plugins/withAndroidReleaseManifest",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Red Zone AR kamera deneyimi için kamera erişimine ihtiyaç duyar.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "enableBackgroundRecording": false,
+          "enableBackgroundPlayback": false
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "3732e89b-e66b-482a-9520-d87a13e7672d"
+      }
+    },
+    "owner": "ephesusmedya4"
+  }
+}

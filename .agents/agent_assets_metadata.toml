@@ -1,0 +1,261 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "FS1kf0N-l6syMwzEUo2IU"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/mp5.mp3"
+type = "audio"
+title = "mp5 sound"
+description = "Generated sound effect: Original realistic game sound effect: short suppressed-style 9mm submachine gun crack and fast bolt. One clean isolated event, no voices, no music."
+
+[[outputs]]
+id = "nX_NnJ4Wk3HtiaIRkiqRn"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/p90.mp3"
+type = "audio"
+title = "p90 sound"
+description = "Generated sound effect: Original realistic game sound effect: high-pitched compact personal defense weapon shot. One clean isolated event, no voices, no music."
+
+[[outputs]]
+id = "y4L1fkKuQAu4W3KmJOd1o"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/glock-17.mp3"
+type = "audio"
+title = "glock-17 sound"
+description = "Generated sound effect: Original realistic game sound effect: sharp compact 9mm pistol shot with metallic slide snap. One clean isolated event, no voices, no music."
+
+[[outputs]]
+id = "NRhwMaXkYp9WX3sDHiy3q"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/benelli-m4.mp3"
+type = "audio"
+title = "benelli-m4 sound"
+description = "Generated sound effect: Original realistic game sound effect: heavy semi-automatic shotgun blast with cycling action. One clean isolated event, no voices, no music."
+
+[[outputs]]
+id = "4nfovoiAZ6o-c_F-x28sm"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/ak-47.mp3"
+type = "audio"
+title = "ak-47 sound"
+description = "Generated sound effect: Original realistic game sound effect: deep punchy assault rifle shot with mechanical bolt clack. One clean isolated event, no voices, no music."
+
+[[outputs]]
+id = "OVuOt_vjvvPzpL51YxKNs"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/dragunov-svd.mp3"
+type = "audio"
+title = "dragunov-svd sound"
+description = "Generated sound effect: Original realistic game sound effect: semi-automatic marksman rifle crack and action cycle. One clean isolated event, no voices, no music."
+
+[[outputs]]
+id = "fy_2wYpq_VsBxfPafOQwr"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/remington-870.mp3"
+type = "audio"
+title = "remington-870 sound"
+description = "Generated sound effect: Original realistic game sound effect: huge pump shotgun blast followed by pump rack. One clean isolated event, no voices, no music."
+
+[[outputs]]
+id = "ewlf3H7egk2T8Tv2T8owV"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/desert-eagle.mp3"
+type = "audio"
+title = "desert-eagle sound"
+description = "Generated sound effect: Original realistic game sound effect: very loud heavy magnum handgun blast with deep indoor tail. One clean isolated event, no voices, no music."
+
+[[outputs]]
+id = "EQNeLEH2l71PweSIaMapn"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/hk416.mp3"
+type = "audio"
+title = "hk416 sound"
+description = "Generated sound effect: Original realistic game sound effect: tight modern rifle crack with restrained low-end. One clean isolated event, no voices, no music."
+
+[[outputs]]
+id = "T0uFf8PglMROd8PN3uFdb"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/minigun-m134.mp3"
+type = "audio"
+title = "minigun-m134 sound"
+description = "Generated sound effect: Original realistic game sound effect: electric rotary minigun burst spin and dense rapid reports. One clean isolated event, no voices, no music."
+
+[[outputs]]
+id = "4soy6txxUDUi4tcCIm8K9"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/m249.mp3"
+type = "audio"
+title = "m249 sound"
+description = "Generated sound effect: Original realistic game sound effect: belt-fed light machine gun shot with metallic feed mechanism. One clean isolated event, no voices, no music."
+
+[[outputs]]
+id = "87LoZhMS3Cv_eqYpb6w28"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/mg42.mp3"
+type = "audio"
+title = "mg42 sound"
+description = "Generated sound effect: Original realistic game sound effect: very fast hard machine gun crack with vintage steel mechanism. One clean isolated event, no voices, no music."
+
+[[outputs]]
+id = "yA9nItxBdcOJYjkZdUn3N"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/m4a1.mp3"
+type = "audio"
+title = "m4a1 sound"
+description = "Generated sound effect: Original realistic game sound effect: crisp modern carbine shot with short gas action. One clean isolated event, no voices, no music."
+
+[[outputs]]
+id = "Yolr9NtMhUNBxPRfCamC-"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/flashbang.mp3"
+type = "audio"
+title = "flashbang sound"
+description = "Generated sound effect: Original realistic game sound effect: stun grenade detonation, sharp bright bang and ringing tail. One clean isolated event, no voices, no music."
+
+[[outputs]]
+id = "G4Zd8qQdgACqmhSgPXTLh"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/smoke-grenade.mp3"
+type = "audio"
+title = "smoke-grenade sound"
+description = "Generated sound effect: Original realistic game sound effect: smoke grenade ignition pop followed by forceful gas hiss. One clean isolated event, no voices, no music."
+
+[[outputs]]
+id = "2uM-n7J7InL198TW--zZ-"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/frag-grenade.mp3"
+type = "audio"
+title = "frag-grenade sound"
+description = "Generated sound effect: Original realistic game sound effect: fragmentation grenade explosion outdoors with debris tail. One clean isolated event, no voices, no music."
+
+[[outputs]]
+id = "YjqvUn5vKlzVb7ido97vj"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/barrett-m82.mp3"
+type = "audio"
+title = "barrett-m82 sound"
+description = "Generated sound effect: Original realistic game sound effect: massive anti-materiel rifle concussion and long outdoor echo. One clean isolated event, no voices, no music."
+
+[[outputs]]
+id = "33K5s34BZYiwmhSGKn_FH"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/awp.mp3"
+type = "audio"
+title = "awp sound"
+description = "Generated sound effect: Original realistic game sound effect: powerful bolt-action sniper rifle report with distant outdoor echo and metallic bolt tail. One clean isolated event, no voices, no music."
+
+[[outputs]]
+id = "l4Bv92XEZU5CTqyQc_ACp"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/uzi.mp3"
+type = "audio"
+title = "Uzi submachine gun game firing sound"
+description = "Generated sound effect: Original cinematic video game sound effect inspired by a Uzi submachine gun: one distinctive outdoor firing report with mechanical action and a short natural decay, dry close …"
+
+[[outputs]]
+id = "gBBhPjUD4LZspVIxLrxqL"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/scar-l.mp3"
+type = "audio"
+title = "FN SCAR-L assault rifle game firing sound"
+description = "Generated sound effect: Original cinematic video game sound effect inspired by a FN SCAR-L assault rifle: one distinctive outdoor firing report with mechanical action and a short natural decay, dry c…"
+
+[[outputs]]
+id = "K2laMkwpL3du3rJGblCvY"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/famas.mp3"
+type = "audio"
+title = "FAMAS F1 bullpup rifle game firing sound"
+description = "Generated sound effect: Original cinematic video game sound effect inspired by a FAMAS F1 bullpup rifle: one distinctive outdoor firing report with mechanical action and a short natural decay, dry cl…"
+
+[[outputs]]
+id = "SvR7AVm3fAgffQJOKvcMY"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/mg3.mp3"
+type = "audio"
+title = "Rheinmetall MG3 general-purpose machine gun game firing sound"
+description = "Generated sound effect: Original cinematic video game sound effect inspired by a Rheinmetall MG3 general-purpose machine gun: one distinctive outdoor firing report with mechanical action and a short …"
+
+[[outputs]]
+id = "zjyNyBeGNXIiFrl4A4Zxn"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/akm.mp3"
+type = "audio"
+title = "AKM Kalashnikov assault rifle game firing sound"
+description = "Generated sound effect: Original cinematic video game sound effect inspired by a AKM Kalashnikov assault rifle: one distinctive outdoor firing report with mechanical action and a short natural decay,…"
+
+[[outputs]]
+id = "IiG-FBRDSIKOT28LoIu9d"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/g3.mp3"
+type = "audio"
+title = "Heckler & Koch G3 battle rifle game firing sound"
+description = "Generated sound effect: Original cinematic video game sound effect inspired by a Heckler & Koch G3 battle rifle: one distinctive outdoor firing report with mechanical action and a short natural decay…"
+
+[[outputs]]
+id = "_Sa5-NBxiRPt2b6WUpC9P"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/m16a4.mp3"
+type = "audio"
+title = "Colt M16A4 assault rifle game firing sound"
+description = "Generated sound effect: Original cinematic video game sound effect inspired by a Colt M16A4 assault rifle: one distinctive outdoor firing report with mechanical action and a short natural decay, dry …"
+
+[[outputs]]
+id = "yqWqcT7xxR8NowRbGDhfn"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/g36c.mp3"
+type = "audio"
+title = "Heckler & Koch G36C compact rifle game firing sound"
+description = "Generated sound effect: Original cinematic video game sound effect inspired by a Heckler & Koch G36C compact rifle: one distinctive outdoor firing report with mechanical action and a short natural de…"
+
+[[outputs]]
+id = "uhmLMuRe5LjKCcDTmFcb3"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/pkm.mp3"
+type = "audio"
+title = "PKM general-purpose machine gun game firing sound"
+description = "Generated sound effect: Original cinematic video game sound effect inspired by a PKM general-purpose machine gun: one distinctive outdoor firing report with mechanical action and a short natural deca…"
+
+[[outputs]]
+id = "nq08UklOhYhXMYUzFp8cE"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/aug-a3.mp3"
+type = "audio"
+title = "Steyr AUG A3 bullpup rifle game firing sound"
+description = "Generated sound effect: Original cinematic video game sound effect inspired by a Steyr AUG A3 bullpup rifle: one distinctive outdoor firing report with mechanical action and a short natural decay, dr…"
+
+[[outputs]]
+id = "c9-MC6nD3L4nmNYuqMgcb"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/rpg-7.mp3"
+type = "audio"
+title = "rpg-7 weapon sound"
+description = "Generated sound effect: Short cinematic game sound effect for a rugged rocket launcher: punchy low launch boom, hollow tube blast and quick mechanical clack tail, non-realistic arcade mix, no music, …"
+
+[[outputs]]
+id = "qPN-TnsxIpTmu4lu2i126"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/electric-arc.mp3"
+type = "audio"
+title = "electric-arc weapon sound"
+description = "Generated sound effect: Short futuristic game sound effect for a fictional electric arc weapon: rising electrical coil hum, snapping violet arc discharge and a quick buzzing decay, no explosion, no m…"
+
+[[outputs]]
+id = "3YpX8FARdUB2n2RMGo_2z"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/laser-rifle.mp3"
+type = "audio"
+title = "laser-rifle weapon sound"
+description = "Generated sound effect: Short futuristic game sound effect for a fictional prism laser rifle: bright crystalline charge chirp into a focused blue energy zap with sparkling tail, no explosion, no musi…"
+
+[[outputs]]
+id = "NdChlfyD6tR2VwXXeNiYi"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/bazooka.mp3"
+type = "audio"
+title = "bazooka weapon sound"
+description = "Generated sound effect: Short cinematic game sound effect for a shoulder-fired rocket launcher: deep compressed launch thump, rushing air burst and brief metallic tube resonance, non-realistic arcade…"
+
+[[outputs]]
+id = "hHL4i4frmYhQ6QY6fAMYf"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/knife.mp3"
+type = "audio"
+title = "knife weapon sound"
+description = "Generated sound effect: Short tactile game sound effect for a game knife action: quick clean metal unsheathe swish followed by a light controlled slash whoosh, no impact, no blood, no music, no voice"
+
+[[outputs]]
+id = "HFmK9Z6BLeREfIR0QFNxr"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/slingshot.mp3"
+type = "audio"
+title = "slingshot weapon sound"
+description = "Generated sound effect: Short tactile game sound effect for a metal slingshot firing one polished steel ball: elastic twang, tiny metal snap and fast airy zip, no gunshot, no music, no voice"
+
+[[outputs]]
+id = "mqE3ApP7a0d7utN2AaIHz"
+uri = "file:///home/runner/workspace/artifacts/ephesus-ar/assets/audio/weapons/at4.mp3"
+type = "audio"
+title = "at4 weapon sound"
+description = "Generated sound effect: Short cinematic game sound effect for a compact disposable rocket launcher: sharp launch crack, forceful bass pressure pulse and brief wind wash, non-realistic arcade mix, no …"
+
+[[outputs]]
+id = "OWEVUw-qlwDeUPVVMa82M"
+uri = "file://artifacts/ephesus-ar/assets/audio/red-zone-weapon-menu-accent.mp3"
+type = "audio"
+title = "Red Zone weapon menu accent"
+description = "Generated sound effect: Original short restrained weapon-menu sound accent for a mobile combat game: soft mechanical slide and metallic chamber click with a tiny low tactical thump, clean and cinemat…"
+
+[[outputs]]
+id = "8P_8rV32BzHfw4KJ1eOAY"
+uri = "file://artifacts/ephesus-ar/assets/audio/red-zone-menu-combat.mp3"
+type = "audio"
+title = "Red Zone menu combat loop"
+description = "Generated music: Original instrumental opening soundtrack for a premium mobile augmented-reality combat game weapon menu. Tense but restrained and attractive: low cinematic pulse, muted tactical perc…"
