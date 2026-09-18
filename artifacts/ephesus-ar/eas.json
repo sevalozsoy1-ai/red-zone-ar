@@ -7,6 +7,8 @@
     "preview": {
       "distribution": "internal",
       "environment": "preview",
+      "corepack": true,
+      "pnpm": "10.26.1",
       "android": {
         "buildType": "apk"
       },
