@@ -4,14 +4,16 @@ import Svg, { Path, Circle, Line, Defs, RadialGradient, Stop } from 'react-nativ
 import { useI18n } from '@/hooks/useI18n';
 import { uiText } from '@/lib/i18n';
 
-export function ScopeOverlay({ aimAnim, isScopeActive, zoom, zeroOffset }: {
+export function ScopeOverlay({ aimAnim, isScopeActive, zoom, zeroOffset, reticleColor }: {
   aimAnim: Animated.ValueXY;
   isScopeActive: boolean;
   zoom: number;
   zeroOffset: { x: number; y: number };
+  reticleColor?: string;
 }) {
   const { width, height } = useWindowDimensions();
   const { locale } = useI18n();
+  const color = reticleColor ?? '#14ff14';
   const enterAnim = useRef(new Animated.Value(0)).current;
   // Keep the SVG inside the viewport. A 3x off-screen canvas can allocate a
   // large native surface on Android when the scope mounts and is unnecessary
@@ -79,39 +81,43 @@ export function ScopeOverlay({ aimAnim, isScopeActive, zoom, zeroOffset }: {
         <Circle cx={centerX} cy={centerY} r={lensRadius} fill="url(#vignette)" />
 
         {/* Crosshairs */}
-        <Line x1={centerX} y1={centerY - lensRadius} x2={centerX} y2={centerY + lensRadius} stroke="rgba(20,255,20,0.8)" strokeWidth="2" />
-        <Line x1={centerX - lensRadius} y1={centerY} x2={centerX + lensRadius} y2={centerY} stroke="rgba(20,255,20,0.8)" strokeWidth="2" />
+         <Line x1={centerX} y1={centerY - lensRadius} x2={centerX} y2={centerY + lensRadius} stroke={color} strokeOpacity="0.8" strokeWidth="2" />
+         <Line x1={centerX - lensRadius} y1={centerY} x2={centerX + lensRadius} y2={centerY} stroke={color} strokeOpacity="0.8" strokeWidth="2" />
 
         {/* Inner thin lines */}
-        <Line x1={centerX} y1={centerY - 50} x2={centerX} y2={centerY + 50} stroke="rgba(255,255,255,0.5)" strokeWidth="1" />
-        <Line x1={centerX - 50} y1={centerY} x2={centerX + 50} y2={centerY} stroke="rgba(255,255,255,0.5)" strokeWidth="1" />
+        <Line x1={centerX} y1={centerY - 50} x2={centerX} y2={centerY + 50} stroke={color} strokeOpacity="0.5" strokeWidth="1" />
+        <Line x1={centerX - 50} y1={centerY} x2={centerX + 50} y2={centerY} stroke={color} strokeOpacity="0.5" strokeWidth="1" />
 
         {/* Mil dots */}
         {[...Array(15)].map((_, i) => i !== 7 && (
-            <Line key={`h${i}`} x1={centerX - 8} y1={centerY - lensRadius * 0.78 + i * lensRadius * 0.13} x2={centerX + 8} y2={centerY - lensRadius * 0.78 + i * lensRadius * 0.13} stroke="rgba(20,255,20,0.9)" strokeWidth="2" />
+            <Line key={`h${i}`} x1={centerX - 8} y1={centerY - lensRadius * 0.78 + i * lensRadius * 0.13} x2={centerX + 8} y2={centerY - lensRadius * 0.78 + i * lensRadius * 0.13} stroke={color} strokeOpacity="0.9" strokeWidth="2" />
         ))}
         {[...Array(15)].map((_, i) => i !== 7 && (
-            <Line key={`v${i}`} x1={centerX - lensRadius * 0.78 + i * lensRadius * 0.13} y1={centerY - 8} x2={centerX - lensRadius * 0.78 + i * lensRadius * 0.13} y2={centerY + 8} stroke="rgba(20,255,20,0.9)" strokeWidth="2" />
+            <Line key={`v${i}`} x1={centerX - lensRadius * 0.78 + i * lensRadius * 0.13} y1={centerY - 8} x2={centerX - lensRadius * 0.78 + i * lensRadius * 0.13} y2={centerY + 8} stroke={color} strokeOpacity="0.9" strokeWidth="2" />
         ))}
 
         {/* Rangefinder curved line bottom left */}
-        <Path d={`M ${centerX - lensRadius * 0.78} ${centerY + lensRadius * 0.22} Q ${centerX - lensRadius * 0.56} ${centerY + lensRadius * 0.67} ${centerX - lensRadius * 0.22} ${centerY + lensRadius * 0.78}`} fill="none" stroke="rgba(20,255,20,0.6)" strokeWidth="2" strokeDasharray="4,4" />
+        <Path d={`M ${centerX - lensRadius * 0.78} ${centerY + lensRadius * 0.22} Q ${centerX - lensRadius * 0.56} ${centerY + lensRadius * 0.67} ${centerX - lensRadius * 0.22} ${centerY + lensRadius * 0.78}`} fill="none" stroke={color} strokeOpacity="0.6" strokeWidth="2" strokeDasharray="4,4" />
 
-        <Circle cx={centerX} cy={centerY} r={3} fill="#ff3b30" />
+         <Circle cx={centerX} cy={centerY} r={3} fill={color} />
       </Svg>
 
-       <View style={{ position: 'absolute', top: centerY - lensRadius * 0.89, alignSelf: 'center', backgroundColor: 'rgba(0,255,0,0.1)', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 4, borderWidth: 1, borderColor: 'rgba(20,255,20,0.5)' }}>
-           <Text style={{ color: '#14ff14', fontWeight: '900', fontSize: 14, letterSpacing: 3, textShadowColor: '#000', textShadowRadius: 2, textShadowOffset: {width: 0, height: 1} }}>{zoom.toFixed(1)}× {uiText(locale, 'scopeMagnification')}</Text>
+       <View style={{ position: 'absolute', top: centerY - lensRadius * 0.89, alignSelf: 'center', backgroundColor: 'rgba(0,0,0,0.2)', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 4, borderWidth: 1, borderColor: color }}>
+           <Text style={{ color, fontWeight: '900', fontSize: 14, letterSpacing: 3, textShadowColor: '#000', textShadowRadius: 2, textShadowOffset: {width: 0, height: 1} }}>{zoom.toFixed(1)}× {uiText(locale, 'scopeMagnification')}</Text>
       </View>
        <View style={{ position: 'absolute', top: centerY + lensRadius * 0.67, left: centerX + lensRadius * 0.22 }}>
-           <Text style={{ color: 'rgba(20,255,20,0.8)', fontWeight: 'bold', fontSize: 10, fontFamily: 'monospace' }}>{uiText(locale, 'scopeDistance')}: ---</Text>
-           <Text style={{ color: 'rgba(20,255,20,0.8)', fontWeight: 'bold', fontSize: 10, fontFamily: 'monospace' }}>{uiText(locale, 'scopeWind')}: 0.0</Text>
+           <Text style={{ color, opacity: 0.8, fontWeight: 'bold', fontSize: 10, fontFamily: 'monospace' }}>{uiText(locale, 'scopeDistance')}: ---</Text>
+           <Text style={{ color, opacity: 0.8, fontWeight: 'bold', fontSize: 10, fontFamily: 'monospace' }}>{uiText(locale, 'scopeWind')}: 0.0</Text>
       </View>
     </Animated.View>
   );
 }
 
-export function NormalReticle({ aimAnim, isScopeActive }: { aimAnim: Animated.ValueXY, isScopeActive?: boolean }) {
+export function NormalReticle({ aimAnim, isScopeActive, color = '#00e5ff' }: {
+  aimAnim: Animated.ValueXY;
+  isScopeActive?: boolean;
+  color?: string;
+}) {
     const { width, height } = useWindowDimensions();
 
     if (isScopeActive) return null;
@@ -125,18 +131,22 @@ export function NormalReticle({ aimAnim, isScopeActive }: { aimAnim: Animated.Va
             { transform: [{ translateX: aimAnim.x }, { translateY: aimAnim.y }] }
         ]} pointerEvents="none" testID="normal-reticle">
             {/* White crosshairs with black shadow for maximum visibility on all backgrounds */}
-            <View style={[styles.reticleLine, { width: 3, height: 16, top: 0 }]} />
-            <View style={[styles.reticleLine, { width: 3, height: 16, bottom: 0 }]} />
-            <View style={[styles.reticleLine, { width: 16, height: 3, left: 0 }]} />
-            <View style={[styles.reticleLine, { width: 16, height: 3, right: 0 }]} />
+             <View style={[styles.reticleLine, { backgroundColor: color, width: 3, height: 16, top: 0 }]} />
+             <View style={[styles.reticleLine, { backgroundColor: color, width: 3, height: 16, bottom: 0 }]} />
+             <View style={[styles.reticleLine, { backgroundColor: color, width: 16, height: 3, left: 0 }]} />
+             <View style={[styles.reticleLine, { backgroundColor: color, width: 16, height: 3, right: 0 }]} />
 
             {/* Center dot */}
-            <View style={styles.reticleDot} />
+             <View style={[styles.reticleDot, { backgroundColor: color }]} />
         </Animated.View>
     );
 }
 
-export function IronSightOverlay({ aimAnim, isActive }: { aimAnim: Animated.ValueXY; isActive: boolean }) {
+export function IronSightOverlay({ aimAnim, isActive, reticleColor = '#00e5ff' }: {
+  aimAnim: Animated.ValueXY;
+  isActive: boolean;
+  reticleColor?: string;
+}) {
   const { width, height } = useWindowDimensions();
   if (!isActive) return null;
 
@@ -160,7 +170,7 @@ export function IronSightOverlay({ aimAnim, isActive }: { aimAnim: Animated.Valu
         <View style={styles.frontSightPost} />
         <View style={styles.frontSightDot} />
       </View>
-      <View style={styles.sightCenterDot} />
+       <View style={[styles.sightCenterDot, { backgroundColor: reticleColor, borderColor: reticleColor }]} />
     </Animated.View>
   );
 }

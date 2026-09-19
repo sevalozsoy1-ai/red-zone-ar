@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Feather } from '@expo/vector-icons';
+import { useKeepAwake } from 'expo-keep-awake';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LiveBattleCamera from './LiveBattleCamera';
 import type { CameraStatus } from './camera-types';
@@ -29,7 +30,8 @@ import {
   useLeaveBattleRoom,
   type BattleSession,
 } from '@workspace/api-client-react';
-import { detectPlayerMarker } from '@/lib/marker-detection';
+import { createMarkerLockState, detectPlayerMarker, updateMarkerLock } from '@/lib/marker-detection';
+import type { MarkerLockState } from '@/lib/marker-detection';
 import type { VisionMode } from '@/lib/vision-modes';
 import PlayerMarker from './PlayerMarker';
 import { clampAimOffset } from '@/lib/aim';
@@ -58,6 +60,17 @@ const HEAVY_COOLDOWN_MS: Partial<Record<WeaponId, number>> = {
   'minigun-m134': 900,
 };
 
+function shotStatus(reason?: string) {
+  switch (reason) {
+    case 'SHOT_TIMEOUT': return 'Vuruş zaman aşımına uğradı';
+    case 'SOCKET_OFFLINE': return 'Ağ bağlantısı yok';
+    case 'INVALID_TARGET':
+    case 'TARGET_NOT_FOUND': return 'Hedef artık geçerli değil';
+    case 'COOLDOWN': return 'Silah bekleme süresinde';
+    default: return 'Vuruş reddedildi';
+  }
+}
+
 export default function BattleScreen({
   onExit,
   battleSession,
@@ -67,6 +80,7 @@ export default function BattleScreen({
   battleSession?: BattleSession | null;
   onSessionExpired?: () => void;
 }) {
+  useKeepAwake();
   const colors = useColors();
   const { locale, t, rtl } = useI18n();
   const insets = useSafeAreaInsets();
@@ -120,18 +134,23 @@ export default function BattleScreen({
     reloading: false,
   });
   const [detectedMarkerId, setDetectedMarkerId] = useState<number | null>(null);
+  const [reticleHit, setReticleHit] = useState(false);
   const [combatFlash, setCombatFlash] = useState<'hit' | 'hurt' | null>(null);
   const [shotMessage, setShotMessage] = useState('');
   const [clock, setClock] = useState(Date.now());
   const previousHealthRef = useRef<{ hp: number; lives: number } | null>(null);
   const suppressNextHealthFlashRef = useRef(false);
   const suppressHealthFlashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const networkPendingRef = useRef<{ shotId: string; weaponId: WeaponId } | null>(null);
+  // Socket intents are independent: a legal burst can have several server
+  // acknowledgements in flight at once. The server remains authoritative for
+  // cadence and idempotency; these maps only reconcile local ammo/UI state.
+  const networkPendingRef = useRef(new Map<string, { weaponId: WeaponId }>());
+  const networkAmmoPendingRef = useRef(new Set<string>());
   const seenNetworkHitIdsRef = useRef(new Set<string>());
   const flashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   const { selectedWeapon, setSelectedWeapon, activeGold, creditCents } = useGame();
-  const { playShot, playReload, playTestSound, error } = useWeaponAudio();
+  const { playShot, playReload, playTestSound, prepareWeapon, error } = useWeaponAudio();
   
   const [ammo, setAmmo] = useState(0);
   const [isReloading, setIsReloading] = useState(false);
@@ -179,6 +198,8 @@ export default function BattleScreen({
   const aimTouchRef = useRef<AimTouchLayerRef>(null);
   const reloadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const detectedMarkerRef = useRef<number | null>(null);
+  const markerLockRef = useRef<MarkerLockState>(createMarkerLockState());
+  const reticleHitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingShotRef = useRef<{ weaponId: WeaponId; shotId?: string } | null>(null);
   const fireOneRef = useRef<(fireMode?: 'primary' | 'throw') => boolean>(() => false);
   activeGoldRef.current = activeGold;
@@ -187,15 +208,20 @@ export default function BattleScreen({
   const playReloadRef = useRef(playReload);
   useEffect(() => { playShotRef.current = playShot; }, [playShot]);
   useEffect(() => { playReloadRef.current = playReload; }, [playReload]);
+  useEffect(() => { prepareWeapon(selectedWeapon); }, [prepareWeapon, selectedWeapon]);
 
   useEffect(() => {
     const nextIdentity = battleSession
       ? `${battleSession.room.code}:${battleSession.playerId}:${battleSession.sessionToken}`
       : null;
     if (nextIdentity !== sessionIdentityRef.current) {
-      networkPendingRef.current = null;
+      networkPendingRef.current.clear();
+      networkAmmoPendingRef.current.clear();
       pendingShotRef.current = null;
       shotInFlightRef.current = false;
+        markerLockRef.current = createMarkerLockState();
+        detectedMarkerRef.current = null;
+        setDetectedMarkerId(null);
       seenNetworkHitIdsRef.current.clear();
       suppressNextHealthFlashRef.current = false;
       if (suppressHealthFlashTimeoutRef.current) clearTimeout(suppressHealthFlashTimeoutRef.current);
@@ -360,6 +386,7 @@ export default function BattleScreen({
         if (reloadTimeoutRef.current) clearTimeout(reloadTimeoutRef.current);
         if (flashTimeoutRef.current) clearTimeout(flashTimeoutRef.current);
         if (suppressHealthFlashTimeoutRef.current) clearTimeout(suppressHealthFlashTimeoutRef.current);
+        if (reticleHitTimeoutRef.current) clearTimeout(reticleHitTimeoutRef.current);
         fireAnim.stopAnimation();
         recoilAnim.stopAnimation();
         knifeThrowRunRef.current += 1;
@@ -375,10 +402,14 @@ export default function BattleScreen({
 
   useEffect(() => {
     if (!networkHitTest) return;
-    const validTarget = room?.players.some((player) =>
-      player.id === networkTargetId && player.id !== ownPlayer?.id && player.alive
-    );
-    if (!validTarget) setNetworkTargetId(null);
+    const liveOpponents = room?.players.filter((player) =>
+      player.id !== ownPlayer?.id && player.alive
+    ) ?? [];
+    const validTarget = liveOpponents.some((player) => player.id === networkTargetId);
+    // In a two-player test there is no ambiguity: make the sole opponent the
+    // target so seeing their roster name is not mistaken for a manual lock.
+    if (liveOpponents.length === 1 && !validTarget) setNetworkTargetId(liveOpponents[0].id);
+    else if (!validTarget) setNetworkTargetId(null);
   }, [networkHitTest, networkTargetId, ownPlayer?.id, room?.players]);
 
   useEffect(() => {
@@ -386,7 +417,11 @@ export default function BattleScreen({
     if (!event || !battleSession) return;
     if (seenNetworkHitIdsRef.current.has(event.shotId)) return;
     seenNetworkHitIdsRef.current.add(event.shotId);
-    if (event.shooterId === battleSession.playerId) showFlash('hit');
+    if (event.shooterId === battleSession.playerId) {
+      showFlash('hit');
+      showReticleHit();
+      setShotMessage('Vuruş onaylandı');
+    }
     if (event.targetId === battleSession.playerId) {
       suppressNextHealthFlashRef.current = true;
       if (suppressHealthFlashTimeoutRef.current) clearTimeout(suppressHealthFlashTimeoutRef.current);
@@ -399,23 +434,53 @@ export default function BattleScreen({
   }, [battleSession?.playerId, networkSocket.lastHit]);
 
   useEffect(() => {
-    const ack = networkSocket.lastAck;
-    if (!ack?.shotId) return;
-    if (ack.accepted) {
-      if (networkPendingRef.current?.shotId === ack.shotId) {
-        networkPendingRef.current = null;
-        releaseBattleShot(shotInFlightRef);
+    for (const ack of networkSocket.ackEvents) {
+      if (!ack.shotId || !networkPendingRef.current.has(ack.shotId)) continue;
+      const pending = networkPendingRef.current.get(ack.shotId);
+      networkPendingRef.current.delete(ack.shotId);
+      if (ack.accepted === true) {
+        networkAmmoPendingRef.current.delete(ack.shotId);
+        setShotMessage('Vuruş gönderildi');
+      } else if (ack.accepted === false) {
+        if (networkAmmoPendingRef.current.delete(ack.shotId) && pending) {
+          const weapon = getWeapon(pending.weaponId);
+          if (weaponRef.current === pending.weaponId) {
+            const restoredAmmo = Math.min(weapon.capacity, ammoRef.current + 1);
+            ammoRef.current = restoredAmmo;
+            setAmmo(restoredAmmo);
+          } else {
+            const saved = magazineInventoryRef.current.weapons[pending.weaponId];
+            if (saved) {
+              magazineInventoryRef.current = setMagazineAmmo(
+                magazineInventoryRef.current,
+                pending.weaponId,
+                weapon.capacity,
+                saved.ammo + 1,
+              );
+            }
+          }
+        }
+        setShotMessage(shotStatus(ack.reason));
+      } else {
+        // Transport exhaustion is indeterminate: the server may have applied
+        // this shot before the ack was lost. Clear the local capacity but never
+        // refund ammo unless the server explicitly rejected the shot.
+        networkAmmoPendingRef.current.delete(ack.shotId);
+        setShotMessage('Vuruş durumu doğrulanamadı');
       }
-      if (pendingShotRef.current?.shotId === ack.shotId) pendingShotRef.current = null;
-    } else {
-      if (networkPendingRef.current?.shotId === ack.shotId) {
-        networkPendingRef.current = null;
-        releaseBattleShot(shotInFlightRef);
-      }
-      if (pendingShotRef.current?.shotId === ack.shotId) restoreRejectedShot();
-      setShotMessage(t('waiting'));
     }
-  }, [networkSocket.lastAck, t]);
+  }, [networkSocket.ackEvents]);
+
+  useEffect(() => {
+    const snapshot = networkSocket.lastRoomState;
+    if (!snapshot?.room || !battleSession) return;
+    queryClient.setQueryData(roomQueryKey, (previous: unknown) => ({
+      ...(previous && typeof previous === 'object' ? previous : {}),
+      playerId: battleSession.playerId,
+      sessionToken: battleSession.sessionToken,
+      room: snapshot.room,
+    }));
+  }, [battleSession, networkSocket.lastRoomState, queryClient, roomQueryKey]);
 
   useEffect(() => {
     if (!battleSession) return;
@@ -427,6 +492,15 @@ export default function BattleScreen({
     if (flashTimeoutRef.current) clearTimeout(flashTimeoutRef.current);
     setCombatFlash(kind);
     flashTimeoutRef.current = setTimeout(() => setCombatFlash(null), 420);
+  };
+
+  const showReticleHit = () => {
+    setReticleHit(true);
+    if (reticleHitTimeoutRef.current) clearTimeout(reticleHitTimeoutRef.current);
+    reticleHitTimeoutRef.current = setTimeout(() => {
+      setReticleHit(false);
+      reticleHitTimeoutRef.current = null;
+    }, 650);
   };
 
   useEffect(() => {
@@ -470,6 +544,7 @@ export default function BattleScreen({
       onSuccess: (result) => {
         if (result.accepted) {
           pendingShotRef.current = null;
+          showReticleHit();
         } else {
           restoreRejectedShot();
         }
@@ -480,7 +555,7 @@ export default function BattleScreen({
             room: result.room,
           });
         }
-         setShotMessage(result.accepted ? t('ready') : t('waiting'));
+         setShotMessage(result.accepted ? 'Vuruş onaylandı' : shotStatus((result as { reason?: string }).reason));
         if (result.accepted) showFlash('hit');
       },
       onError: (requestError) => {
@@ -489,7 +564,7 @@ export default function BattleScreen({
            handleSessionExpired();
            return;
          }
-         setShotMessage(t('errorMessage'));
+          setShotMessage('Vuruş gönderilemedi');
       },
       onSettled: () => {
         releaseBattleShot(shotInFlightRef);
@@ -528,9 +603,9 @@ export default function BattleScreen({
     if (knifeThrowRunningRef.current || !isLiveRef.current || showAdRef.current || reloadingRef.current || !hasAmmo || now - lastFireTimeRef.current < cooldown) return false;
     const markerId = detectedMarkerRef.current;
     const networkTarget = room?.players.find((player) => player.id === networkTargetId && player.alive && player.id !== ownPlayer?.id);
-    if (networkHitTest && (!battleSession || !networkTarget || !networkSocket.connected)) return false;
-    if (networkPendingRef.current) return false;
-    if (battleSession && (markerId !== null || networkHitTest) && !tryAcquireBattleShot(shotInFlightRef)) return false;
+    const hasNetworkPath = !!battleSession && networkHitTest && !!networkTarget && networkSocket.connected;
+    const hasMarkerPath = !!battleSession && !networkHitTest && markerId !== null;
+    if (battleSession && hasMarkerPath && !tryAcquireBattleShot(shotInFlightRef)) return false;
     lastFireTimeRef.current = now;
     if (!activeGoldRef.current && (w.id !== 'knife' || fireMode === 'throw')) {
       ammoRef.current -= 1;
@@ -546,11 +621,11 @@ export default function BattleScreen({
     }
     recoilAnim.setValue(w.recoil * 3);
     Animated.spring(recoilAnim, { toValue: 0, friction: 6, tension: 120, useNativeDriver: true }).start();
-    if (networkHitTest && battleSession && networkTarget) {
+    if (networkHitTest && battleSession && networkTarget && networkSocket.connected) {
       const consumedAmmo = !activeGoldRef.current && (w.id !== 'knife' || fireMode === 'throw');
       const shotId = createShotId();
-      networkPendingRef.current = { shotId, weaponId: w.id };
-      if (consumedAmmo) pendingShotRef.current = { weaponId: w.id, shotId };
+      networkPendingRef.current.set(shotId, { weaponId: w.id });
+      if (consumedAmmo) networkAmmoPendingRef.current.add(shotId);
       const sent = networkSocket.sendShotIntent({
         shotId,
         targetPlayerId: networkTarget.id,
@@ -559,13 +634,17 @@ export default function BattleScreen({
         clientFiredAt: now,
       });
       if (!sent) {
-        networkPendingRef.current = null;
-        restoreRejectedShot();
-        releaseBattleShot(shotInFlightRef);
+        networkPendingRef.current.delete(shotId);
+        if (networkAmmoPendingRef.current.delete(shotId)) {
+          const restoredAmmo = Math.min(w.capacity, ammoRef.current + 1);
+          ammoRef.current = restoredAmmo;
+          setAmmo(restoredAmmo);
+        }
+        setShotMessage('Ağ bağlantısı yok');
       } else {
-        setShotMessage(t('ready'));
+        setShotMessage('Vuruş gönderiliyor');
       }
-    } else if (battleSession && markerId !== null) {
+    } else if (!networkHitTest && battleSession && markerId !== null) {
       const consumedAmmo = !activeGoldRef.current && (w.id !== 'knife' || fireMode === 'throw');
       if (consumedAmmo) pendingShotRef.current = { weaponId: w.id };
       shot.mutate({
@@ -577,6 +656,8 @@ export default function BattleScreen({
           fireMode,
         },
       } as Parameters<typeof shot.mutate>[0]);
+    } else if (battleSession && networkHitTest) {
+      setShotMessage(networkSocket.connected ? 'Hedef seçilmedi' : 'Ağ bağlantısı yok');
     }
     return true;
   };
@@ -799,7 +880,7 @@ export default function BattleScreen({
             }}
             onFrame={(frame) => {
               if (!room || !ownPlayer) return;
-              const markerId = detectPlayerMarker(
+                const detectedId = detectPlayerMarker(
                 frame,
                room.players.filter((player) =>
                  player.id !== ownPlayer.id
@@ -808,8 +889,14 @@ export default function BattleScreen({
                 aimValue.current,
                 { width, height },
               );
-               detectedMarkerRef.current = markerId;
-               setDetectedMarkerId((current) => current === markerId ? current : markerId);
+                const markerId = updateMarkerLock(markerLockRef.current, detectedId, Date.now(), {
+                  consecutiveFrames: 2,
+                  // Compatibility capture cadence is now 1000ms. Keep a
+                  // lock across one missed capture without making it stale.
+                  holdMs: 1250,
+                });
+                detectedMarkerRef.current = markerId;
+                setDetectedMarkerId((current) => current === markerId ? current : markerId);
             }}
           />
         </Animated.View>
@@ -821,9 +908,23 @@ export default function BattleScreen({
         onAim={updateAim}
       />
       <VisionModeOverlay mode={visionMode} />
-      <ScopeOverlay aimAnim={aimAnim} isScopeActive={isScopeActive && isScopedWeapon} zoom={w.zoom} zeroOffset={scopeZero} />
-      <IronSightOverlay aimAnim={aimAnim} isActive={isScopeActive && !isScopedWeapon && w.archetype !== 'grenade'} />
-      <NormalReticle aimAnim={aimAnim} isScopeActive={isScopeActive} />
+      <ScopeOverlay
+        aimAnim={aimAnim}
+        isScopeActive={isScopeActive && isScopedWeapon}
+        zoom={w.zoom}
+        zeroOffset={scopeZero}
+        reticleColor={reticleHit ? '#ffd60a' : (detectedMarkerId !== null || (networkHitTest && networkTargetId !== null) ? '#ff453a' : '#00e5ff')}
+      />
+      <IronSightOverlay
+        aimAnim={aimAnim}
+        isActive={isScopeActive && !isScopedWeapon && w.archetype !== 'grenade'}
+        reticleColor={reticleHit ? '#ffd60a' : (detectedMarkerId !== null || (networkHitTest && networkTargetId !== null) ? '#ff453a' : '#00e5ff')}
+      />
+      <NormalReticle
+        aimAnim={aimAnim}
+        isScopeActive={isScopeActive}
+        color={reticleHit ? '#ffd60a' : (detectedMarkerId !== null || (networkHitTest && networkTargetId !== null) ? '#ff453a' : '#00e5ff')}
+      />
       {targetedEffect && (
         <View
           pointerEvents="none"

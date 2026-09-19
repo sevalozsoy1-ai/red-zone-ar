@@ -3,6 +3,7 @@ import { Server, type Socket } from "socket.io";
 import {
   authenticateBattleSession,
   fireShotByPlayerId,
+  getPublicBattleSnapshot,
   type BattleFireMode,
 } from "../lib/battle-store";
 
@@ -89,6 +90,9 @@ export function attachBattleSocket(httpServer: HttpServer) {
       roomCode: authenticated.data.roomCode,
       playerId: authenticated.data.playerId,
     });
+    void getPublicBattleSnapshot(authenticated.data.roomCode, authenticated.data.sessionToken)
+      .then((state) => authenticated.emit("battle:state", state))
+      .catch(() => undefined);
 
     authenticated.on("battle:shot-intent", async (payload: unknown, acknowledge?: (response: unknown) => void) => {
       const intent = parseShotIntent(payload);
@@ -124,6 +128,23 @@ export function attachBattleSocket(httpServer: HttpServer) {
             eliminated: result.eliminated,
           });
         }
+        // Push the authoritative snapshot immediately. REST polling remains
+        // the recovery path, but combat no longer waits for its next tick.
+        const roomName = `${ROOM_PREFIX}${authenticated.data.roomCode}`;
+        const sockets = await io.in(roomName).fetchSockets();
+        await Promise.all(sockets.map(async (roomSocket) => {
+          const viewer = roomSocket as unknown as AuthenticatedSocket;
+          try {
+            const state = await getPublicBattleSnapshot(
+              viewer.data.roomCode,
+              viewer.data.sessionToken,
+            );
+            viewer.emit("battle:state", state);
+          } catch {
+            // The socket's next reconnect/REST recovery handles an expired
+            // session; never send another player's filtered snapshot.
+          }
+        }));
       } catch {
         acknowledge?.({ accepted: false, reason: "SHOT_FAILED", shotId: intent.shotId });
       }

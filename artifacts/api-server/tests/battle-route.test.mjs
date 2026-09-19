@@ -6,6 +6,8 @@ import {
   configureBattleStore,
   createRoom,
   InMemoryBattlePersistence,
+  joinRoom,
+  LEASE_TIMEOUT_MS,
   resetBattleStoreForTests,
 } from "../src/lib/battle-store.ts";
 
@@ -54,4 +56,30 @@ test("requires bearer authorization for polling and heartbeat, without putting t
   assert.equal(state.status, 200);
   const payload = await state.json();
   assert.equal(payload.playerId, room.playerId);
+});
+
+test("keeps a locked player reconnectable through the heartbeat route", async () => {
+  const host = await createRoom("route-host", "red");
+  const opponent = await joinRoom(host.room.code, "route-opponent", "blue");
+  now += LEASE_TIMEOUT_MS + 1;
+
+  const stateResponse = await fetch(`${baseUrl}/api/battle/state?code=${host.room.code}`, {
+    headers: { Authorization: `Bearer ${host.sessionToken}` },
+  });
+  assert.equal(stateResponse.status, 200);
+  const disconnected = await stateResponse.json();
+  const opponentBefore = disconnected.room.players.find((player) => player.id === opponent.playerId);
+  assert.equal(disconnected.room.status, "active");
+  assert.equal(opponentBefore.connected, false);
+
+  const heartbeat = await fetch(`${baseUrl}/api/battle/rooms/${host.room.code}/heartbeat`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${opponent.sessionToken}` },
+  });
+  assert.equal(heartbeat.status, 200);
+  const resumed = await heartbeat.json();
+  const opponentAfter = resumed.room.players.find((player) => player.id === opponent.playerId);
+  assert.equal(opponentAfter.connected, true);
+  assert.equal(opponentAfter.markerId, opponentBefore.markerId);
+  assert.equal(opponentAfter.lives, opponentBefore.lives);
 });

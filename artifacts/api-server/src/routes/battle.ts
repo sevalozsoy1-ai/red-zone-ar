@@ -50,14 +50,14 @@ function bearerToken(req: { header(name: string): string | undefined }) {
 router.post("/battle/rooms", async (req, res) => {
   const body = CreateBattleRoomBody.safeParse(req.body);
   if (!body.success) { res.status(400).json({ error: body.error.message }); return; }
-  try { res.status(201).json(await createRoom(body.data.name)); } catch (error) { fail(res, error); }
+  try { res.status(201).json(await createRoom(body.data.name, body.data.requestId)); } catch (error) { fail(res, error); }
 });
 
 router.post("/battle/rooms/:code/players", async (req, res) => {
   const params = JoinBattleRoomParams.safeParse(req.params);
   const body = JoinBattleRoomBody.safeParse(req.body);
   if (!params.success || !body.success) { res.status(400).json({ error: "INVALID_REQUEST" }); return; }
-  try { res.json(await joinRoom(params.data.code, body.data.name)); } catch (error) { fail(res, error); }
+  try { res.json(await joinRoom(params.data.code, body.data.name, body.data.requestId)); } catch (error) { fail(res, error); }
 });
 
 router.get("/battle/state", async (req, res) => {

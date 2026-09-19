@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import * as Crypto from "expo-crypto";
 import {
   getHealthCheckQueryKey,
   type BattleSession,
@@ -19,6 +20,7 @@ import { useI18n } from "@/hooks/useI18n";
 import { uiText } from "@/lib/i18n";
 import { rtlLayout } from "@/lib/rtl";
 import { isGoneBattleSession } from "@/lib/battle-ui";
+import { retryBattleEntry } from "@/lib/battle-entry-retry";
 import { setBattleSessionToken } from "@/lib/battle-auth";
 import { battleSessionCopy } from "@/lib/battle-session-copy";
 import { handleBattleAppStateChange, handleBattleHardwareBack } from "@/lib/battle-session-lifecycle";
@@ -58,7 +60,7 @@ export default function BattleLobbyScreen({ onBack, onStart }: { onBack: () => v
   const [leaveError, setLeaveError] = useState("");
   const [entryIntent, setEntryIntent] = useState<"create" | "join" | null>(null);
   const [entryMatchId, setEntryMatchId] = useState<string | undefined>();
-  const [entryDraft, setEntryDraft] = useState<{ name: string; code?: string } | null>(null);
+  const [entryDraft, setEntryDraft] = useState<{ name: string; code?: string; requestId: string } | null>(null);
   const stateParams = { code: session?.room.code ?? "000000" };
   const authRequest = session?.sessionToken
     ? { headers: { Authorization: `Bearer ${session.sessionToken}` } }
@@ -170,7 +172,10 @@ export default function BattleLobbyScreen({ onBack, onStart }: { onBack: () => v
       setMessage(t("errorMessage"));
       return;
     }
-    setEntryDraft({ name: playerName });
+    setEntryDraft({
+      name: playerName,
+      requestId: `create-${Crypto.randomUUID()}`,
+    });
     setEntryMatchId(`create-${Date.now()}`);
     setEntryIntent("create");
   };
@@ -187,7 +192,11 @@ export default function BattleLobbyScreen({ onBack, onStart }: { onBack: () => v
       setMessage(t("errorMessage"));
       return;
     }
-    setEntryDraft({ name: playerName, code: roomCode });
+    setEntryDraft({
+      name: playerName,
+      code: roomCode,
+      requestId: `join-${Crypto.randomUUID()}`,
+    });
     // A room code is stable for the lifetime of this match and prevents a
     // retry from reserving a second team-entry charge.
     setEntryMatchId(roomCode);
@@ -332,13 +341,21 @@ export default function BattleLobbyScreen({
   const [leaveError, setLeaveError] = useState("");
   const [entryIntent, setEntryIntent] = useState<"create" | "join" | null>(null);
   const [entryMatchId, setEntryMatchId] = useState<string | undefined>();
-  const [entryDraft, setEntryDraft] = useState<{ name: string; code?: string } | null>(null);
+  const [entryDraft, setEntryDraft] = useState<{ name: string; code?: string; requestId: string } | null>(null);
+  const [entryRetryStatus, setEntryRetryStatus] = useState("");
   const [appActive, setAppActive] = useState(AppState.currentState === "active");
   const [sessionExpired, setSessionExpired] = useState(false);
   const appActiveRef = useRef(appActive);
   const sessionExpiredRef = useRef(false);
   const startTransitionRef = useRef(false);
+  const entryInFlightRef = useRef(false);
+  const entryGenerationRef = useRef(0);
+  const mountedRef = useRef(true);
   appActiveRef.current = appActive;
+  useEffect(() => () => {
+    mountedRef.current = false;
+    entryGenerationRef.current += 1;
+  }, []);
   // The bearer belongs only in the Authorization header. Keep the cache
   // segregated by session without giving the URL builder a token field.
   const stateParams = { code: session?.room.code ?? "000000" };
@@ -392,6 +409,8 @@ export default function BattleLobbyScreen({
   }, [appActive, onStart, room, session, sessionExpired]);
 
   const accept = (next: BattleSession) => {
+    entryInFlightRef.current = false;
+    setEntryRetryStatus("");
     sessionExpiredRef.current = false;
     setSessionExpired(false);
     startTransitionRef.current = false;
@@ -401,14 +420,20 @@ export default function BattleLobbyScreen({
     setMessage("");
   };
   const reject = (error: unknown) => {
+    // The retry wrapper owns transient mutation errors. React Query invokes
+    // this callback for every failed attempt, so do not unlock the form or
+    // replace the retry status until the wrapper gives up.
+    if (entryInFlightRef.current) return;
+    entryInFlightRef.current = false;
+    setEntryRetryStatus("");
     if (session && isGoneBattleSession(error)) {
       handleSessionExpired();
       return;
     }
     setMessage(formatLobbyError(error, t));
   };
-  const create = useCreateBattleRoom({ mutation: { onSuccess: accept, onError: reject } });
-  const join = useJoinBattleRoom({ mutation: { onSuccess: accept, onError: reject } });
+  const create = useCreateBattleRoom();
+  const join = useJoinBattleRoom();
   const start = useStartBattleRoom({ request: authRequest, mutation: { onSuccess: accept, onError: reject } });
   const leave = useLeaveBattleRoom({ request: authRequest });
   const busy = create.isPending || join.isPending || start.isPending || leave.isPending;
@@ -483,22 +508,31 @@ export default function BattleLobbyScreen({
 
   const handleCreate = () => {
     if (!appActiveRef.current) return;
+    if (entryInFlightRef.current) return;
+    entryGenerationRef.current += 1;
     const playerName = name.trim();
     setMessage("");
+    setEntryRetryStatus("");
     if (!playerName) {
       setMessage(t("errorMessage"));
       return;
     }
-    setEntryDraft({ name: playerName });
+    setEntryDraft({
+      name: playerName,
+      requestId: `create-${Crypto.randomUUID()}`,
+    });
     setEntryMatchId(`create-${Date.now()}`);
     setEntryIntent("create");
   };
 
   const handleJoin = () => {
     if (!appActiveRef.current) return;
+    if (entryInFlightRef.current) return;
+    entryGenerationRef.current += 1;
     const playerName = name.trim();
     const roomCode = code.trim().toUpperCase();
     setMessage("");
+    setEntryRetryStatus("");
     if (!playerName) {
       setMessage(t("errorMessage"));
       return;
@@ -507,7 +541,11 @@ export default function BattleLobbyScreen({
       setMessage(t("errorMessage"));
       return;
     }
-    setEntryDraft({ name: playerName, code: roomCode });
+    setEntryDraft({
+      name: playerName,
+      code: roomCode,
+      requestId: `join-${Crypto.randomUUID()}`,
+    });
     // A room code is stable for the lifetime of this match and prevents a
     // retry from reserving a second team-entry charge.
     setEntryMatchId(roomCode);
@@ -584,6 +622,7 @@ export default function BattleLobbyScreen({
           </View>
         ) : null}
         {healthQuery.isFetching && !healthQuery.isError ? <Text style={[styles.connectionHint, { color: colors.mutedForeground }]}>{uiText(locale, "serverChecking")}</Text> : null}
+        {entryRetryStatus ? <Text testID="entry-retry-status" style={[styles.connectionHint, { color: colors.cyan }]}>{entryRetryStatus}</Text> : null}
         <TextInput testID="player-name-input" value={name} onChangeText={(value) => { setName(value); setMessage(""); }} maxLength={18} placeholder={uiText(locale, "playerName")} placeholderTextColor={colors.mutedForeground} style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]} />
         <Text style={[styles.sectionTitle, { color: colors.cyan }]}>{uiText(locale, "createRoom")}</Text>
         <Text style={[styles.sectionHint, { color: colors.mutedForeground }]}>{uiText(locale, "roomCreateHint")}</Text>
@@ -607,24 +646,57 @@ export default function BattleLobbyScreen({
         body={uiText(locale, "startRequirements")}
         onApproved={async () => {
           if (!entryIntent || !entryDraft) return false;
+          if (entryInFlightRef.current) return false;
+          const generation = entryGenerationRef.current + 1;
+          entryGenerationRef.current = generation;
+          entryInFlightRef.current = true;
+          setEntryRetryStatus(`${t("waiting")}…`);
           try {
-            if (entryIntent === "create") {
-              await create.mutateAsync({ data: { name: entryDraft.name } } as Parameters<typeof create.mutateAsync>[0]);
-            } else {
-              await join.mutateAsync({ code: entryDraft.code ?? "", data: { name: entryDraft.name } } as Parameters<typeof join.mutateAsync>[0]);
-            }
+            const next = await retryBattleEntry(
+              () => entryIntent === "create"
+                ? create.mutateAsync({ data: { name: entryDraft.name, requestId: entryDraft.requestId } } as Parameters<typeof create.mutateAsync>[0])
+                : join.mutateAsync({
+                    code: entryDraft.code ?? "",
+                    data: { name: entryDraft.name, requestId: entryDraft.requestId },
+                  } as Parameters<typeof join.mutateAsync>[0]),
+              {
+                isCancelled: () => !mountedRef.current || entryGenerationRef.current !== generation,
+                onRetry: (retryNumber, delayMs) => {
+                  if (mountedRef.current && entryGenerationRef.current === generation) {
+                    setEntryRetryStatus(`${t("tryAgain")} ${retryNumber}/2 · ${delayMs} ms`);
+                  }
+                },
+              },
+            );
+            if (!mountedRef.current || entryGenerationRef.current !== generation) return false;
+            accept(next);
             return true;
           } catch (error) {
-            reject(error);
+            if (mountedRef.current && entryGenerationRef.current === generation
+              && !(error instanceof Error && error.message === "BATTLE_ENTRY_CANCELLED")) {
+              entryInFlightRef.current = false;
+              reject(error);
+            }
             return false;
+          } finally {
+            if (entryGenerationRef.current === generation) {
+              entryInFlightRef.current = false;
+              if (mountedRef.current) setEntryRetryStatus("");
+            }
           }
         }}
         onComplete={() => {
+          entryGenerationRef.current += 1;
+          entryInFlightRef.current = false;
+          setEntryRetryStatus("");
           setEntryIntent(null);
           setEntryDraft(null);
           setEntryMatchId(undefined);
         }}
         onCancel={() => {
+          entryGenerationRef.current += 1;
+          entryInFlightRef.current = false;
+          setEntryRetryStatus("");
           setEntryIntent(null);
           setEntryDraft(null);
           setEntryMatchId(undefined);

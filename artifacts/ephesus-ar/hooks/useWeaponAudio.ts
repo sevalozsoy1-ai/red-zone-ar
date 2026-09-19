@@ -8,12 +8,17 @@ import {
   ensureNativeAudioSession,
   suspendNativeAudioSession,
 } from '@/lib/native-audio-session';
+import {
+  createAudioPoolCoordinator,
+  type AudioPoolCoordinator,
+} from '@/lib/audio-pool-coordinator';
 import { getWeapon, type WeaponId } from '@/lib/weapons';
 import { WEAPON_SOUNDS } from '@/lib/weapon-assets';
 
 type SoundKey = WeaponId | 'reload';
 type PlayerPool = {
   players: AudioPlayer[];
+  coordinator: AudioPoolCoordinator<AudioPlayer>;
   ready: Promise<void>;
 };
 type PlayerPools = Partial<Record<SoundKey, PlayerPool>>;
@@ -35,9 +40,9 @@ export type WeaponAudio = {
 export function useWeaponAudio(): WeaponAudio {
   const [error, setError] = useState<string | null>(null);
   const pools = useRef<Partial<PlayerPools>>({});
-  const cursor = useRef<Partial<Record<SoundKey, number>>>({});
   const lastPlayed = useRef<Partial<Record<SoundKey, number>>>({});
-  const queuedKeys = useRef(new Set<SoundKey>());
+  const queuedRequests = useRef(new Map<SoundKey, number>());
+  const requestSequence = useRef(0);
   const poolRecency = useRef(new Map<SoundKey, number>());
   const poolSequence = useRef(0);
   const lifecycleGeneration = useRef(0);
@@ -54,7 +59,8 @@ export function useWeaponAudio(): WeaponAudio {
     if (!pool) return;
     delete pools.current[key];
     poolRecency.current.delete(key);
-    queuedKeys.current.delete(key);
+    pool.coordinator.invalidate();
+    queuedRequests.current.delete(key);
     pool.players.forEach((player) => {
       try {
         player.remove();
@@ -102,7 +108,11 @@ export function useWeaponAudio(): WeaponAudio {
     }
 
     const ready = waitForAnyAudioPlayerReady(players).then(() => undefined);
-    const created = { players, ready };
+    const created = {
+      players,
+      coordinator: createAudioPoolCoordinator(players),
+      ready,
+    };
     pools.current[key] = created;
     poolRecency.current.set(key, ++poolSequence.current);
     // The rejection is consumed here as well as by an individual shot. This
@@ -150,7 +160,7 @@ export function useWeaponAudio(): WeaponAudio {
       subscription.remove();
       (Object.keys(pools.current) as SoundKey[]).forEach(disposePool);
       pools.current = {};
-      queuedKeys.current.clear();
+      queuedRequests.current.clear();
       poolRecency.current.clear();
     };
   }, [disposePool]);
@@ -164,58 +174,103 @@ export function useWeaponAudio(): WeaponAudio {
     const pool = ensurePool(key);
     if (!pool) return;
 
-    // Do not drop the first shot while downloadFirst is still resolving. One
-    // queued request per key is enough; automatic fire will continue normally
-    // once this initial request has completed.
-    if (queuedKeys.current.has(key)) return;
-    queuedKeys.current.add(key);
+    const requestId = ++requestSequence.current;
+    const queuedRequest = queuedRequests.current.get(key);
+    // Do not create an unbounded queue while a newly selected sound is
+    // downloading. One deferred request is enough; subsequent automatic shots
+    // will use the ready pool directly.
+    if (queuedRequest !== undefined) return;
     const generation = lifecycleGeneration.current;
+    const isUsablePlayer = (candidate: AudioPlayer) =>
+      candidate.isLoaded && !candidate.currentStatus.error;
+    const playFromPool = (targetPool: PlayerPool, retry: boolean): Promise<void> => {
+      const lease = targetPool.coordinator.acquire(isUsablePlayer);
+      if (!lease) {
+        // A pool can be ready because any one copy loaded while another copy
+        // is still decoding. Do not rebuild in that case; wait/use the loaded
+        // copy. Rebuild only when no usable native player remains.
+        if (!retry && !targetPool.players.some(isUsablePlayer)) {
+          disposePool(key);
+          const rebuilt = ensurePool(key);
+          if (rebuilt) {
+            return Promise.all([activateNativeAudioSession(), rebuilt.ready])
+              .then(() => playFromPool(rebuilt, true));
+          }
+        }
+        return Promise.resolve();
+      }
+      return Promise.resolve()
+        .then(() => {
+          if (
+            !mounted.current
+            || !active.current
+            || generation !== lifecycleGeneration.current
+            || !targetPool.coordinator.isCurrent(lease.generation)
+          ) return;
+          if (pools.current[key] !== targetPool) {
+            throw new Error('Audio player pool was replaced');
+          }
+          const player = lease.value;
+          if (!player.isLoaded || player.currentStatus.error) {
+            throw new Error('Audio player is not loaded');
+          }
+          return player.seekTo(0).then(() => {
+            if (
+              !mounted.current
+              || !active.current
+              || generation !== lifecycleGeneration.current
+              || !targetPool.coordinator.isCurrent(lease.generation)
+            ) return;
+            try {
+              player.play();
+              setError(null);
+            } catch {
+              throw new Error('Audio player play failed');
+            }
+          });
+        })
+        .catch((playError) => {
+          const hasUsableAlternative = targetPool.players.some(
+            (candidate) => candidate !== lease.value && isUsablePlayer(candidate),
+          );
+          if (!retry && pools.current[key] === targetPool && !hasUsableAlternative) {
+            disposePool(key);
+            const rebuilt = ensurePool(key);
+            if (rebuilt) {
+              return Promise.all([activateNativeAudioSession(), rebuilt.ready])
+                .then(() => playFromPool(rebuilt, true));
+            }
+          }
+          if (!retry && hasUsableAlternative) {
+            return playFromPool(targetPool, true);
+          }
+          throw playError;
+        })
+        .finally(lease.release);
+    };
+
+    const currentReadyPlayer = pool.players.some(isUsablePlayer);
+    if (!currentReadyPlayer) {
+      queuedRequests.current.set(key, requestId);
+    }
 
     void Promise.all([activateNativeAudioSession(), pool.ready])
       .then(() => {
-        queuedKeys.current.delete(key);
+        if (queuedRequests.current.get(key) === requestId) {
+          queuedRequests.current.delete(key);
+        }
         if (
           !mounted.current
           || !active.current
           || generation !== lifecycleGeneration.current
         ) return;
-        const currentPool = pools.current[key];
-        if (currentPool !== pool) throw new Error('Audio player pool was replaced');
-        const readyPool = currentPool.players.filter(
-          (candidate) => candidate.isLoaded && !candidate.currentStatus.error,
-        );
-        if (!readyPool.length) {
-          disposePool(key);
-          throw new Error('Audio player pool is unavailable');
-        }
-        const index = (cursor.current[key] ?? 0) % readyPool.length;
-        cursor.current[key] = (cursor.current[key] ?? 0) + 1;
-        const player = readyPool[index];
-        if (!player.isLoaded) throw new Error('Audio player is not loaded');
-
-        // Resetting a pooled player permits overlapping rounds during
-        // automatic fire. Readiness is checked before seeking so the first
-        // tap cannot rewind an empty native player.
-        return player.seekTo(0).then(() => {
-          if (
-            !mounted.current
-            || !active.current
-            || generation !== lifecycleGeneration.current
-          ) return;
-          try {
-            player.play();
-            // This clears a previous failure only after the asset and audio
-            // mode are verified. Expo's play() is void, so this is not an
-            // audibility/success claim.
-            setError(null);
-          } catch {
-            throw new Error('Audio player play failed');
-          }
-        });
+        return playFromPool(pool, false);
       })
       .catch(() => {
         if (pools.current[key] !== pool) return;
-        queuedKeys.current.delete(key);
+        if (queuedRequests.current.get(key) === requestId) {
+          queuedRequests.current.delete(key);
+        }
         disposePool(key);
         if (mounted.current) {
           setError('Ses oynatılamadı. Cihaz sesini açıp SESİ DENE düğmesine tekrar basın.');

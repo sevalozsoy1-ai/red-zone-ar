@@ -177,6 +177,11 @@ components:
       required: [name]
       properties:
         name: { type: string, minLength: 1, maxLength: 18 }
+        requestId:
+          type: string
+          minLength: 16
+          maxLength: 128
+          pattern: "^[A-Za-z0-9._:-]+$"
     BattleAccessInput:
       type: object
       properties: {}

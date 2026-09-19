@@ -6,7 +6,8 @@ export type BattleEffectKind = "frag" | "flashbang" | "smoke";
 export type BattleFireMode = "primary" | "throw";
 
 export const LEASE_TIMEOUT_MS = 15_000;
-export const RECONNECT_GRACE_MS = 30_000;
+/** A backgrounded/locked client keeps its player slot for 90 seconds. */
+export const RECONNECT_GRACE_MS = 90_000;
 
 export type BattleEffect = {
   id: string;
@@ -57,12 +58,21 @@ type StoredNetworkShotOutcome = {
   eliminated: boolean;
 };
 
+type StoredEntryRequest = {
+  requestId: string;
+  kind: "create" | "join";
+  playerId: string;
+  createdAt: number;
+};
+
 export type StoredBattleRoom = Omit<BattleRoom, "effects"> & {
   effects: StoredBattleEffect[];
   startedPlayerIds: string[];
   sessions: StoredSession[];
   /** Bounded, durable idempotency records for socket shot intents. */
   networkShotOutcomes: StoredNetworkShotOutcome[];
+  /** Durable identity for create/join retries; bearer tokens remain hash-only. */
+  entryRequests: StoredEntryRequest[];
 };
 
 export interface BattlePersistence {
@@ -138,7 +148,8 @@ const MARKERS = ["#FF2D55", "#00E5FF", "#FFD60A", "#7CFF6B", "#BF5AF2", "#FF9F0A
  * deadline alive.  Keep this exported so clients and time-controlled tests
  * can use the same contract as the store.
  */
-export const PLAYER_TIMEOUT_MS = 30_000;
+/** Deadline after the last authenticated presence before permanent removal. */
+export const PLAYER_TIMEOUT_MS = RECONNECT_GRACE_MS;
 const EFFECT_DURATION: Record<BattleEffectKind, number> = {
   frag: 1200,
   flashbang: 2500,
@@ -147,6 +158,9 @@ const EFFECT_DURATION: Record<BattleEffectKind, number> = {
 
 const rooms = new Map<string, StoredBattleRoom>();
 const sessions = new Map<string, StoredSession>();
+type BattleEntrySession = { playerId: string; sessionToken: string; room: BattleRoom };
+const MAX_ENTRY_REQUESTS = 64;
+const ENTRY_RETRY_WINDOW_MS = 15_000;
 const MAX_NETWORK_SHOT_OUTCOMES = 256;
 
 const EXPIRED_SESSION_RETENTION_MS = PLAYER_TIMEOUT_MS;
@@ -420,6 +434,7 @@ function hydrate(snapshot: StoredBattleRoom) {
   room.winnerPlayerId ??= null;
   room.startedPlayerIds ??= room.status === "lobby" ? [] : room.players.map((player) => player.id);
   room.networkShotOutcomes ??= [];
+  room.entryRequests ??= [];
   rooms.set(room.code, room);
   for (const storedSession of room.sessions) {
     const player = room.players.find((entry) => entry.id === storedSession.playerId);
@@ -631,12 +646,72 @@ function renewPresence(authorized: {
   authorized.session.disconnectedAt = null;
   player.connected = true;
 }
-export function createRoom(name: string) {
-  return withStoreOperation(() => createRoomUnlocked(name));
+function validEntryRequestId(requestId: string | undefined) {
+  return requestId && requestId.length >= 16 ? requestId : undefined;
 }
 
-async function createRoomUnlocked(name: string) {
+async function replayEntryRequest(
+  kind: StoredEntryRequest["kind"],
+  requestId: string | undefined,
+  code?: string,
+): Promise<BattleEntrySession | undefined> {
+  if (!requestId) return undefined;
+  const now = clock();
+  await sweepExpiredPlayersUnlocked(now);
+  const expectedCode = code?.toUpperCase();
+  for (const room of rooms.values()) {
+    if (expectedCode && room.code !== expectedCode) continue;
+    const record = room.entryRequests.find((entry) => entry.kind === kind && entry.requestId === requestId);
+    if (!record) continue;
+    if (record.createdAt + ENTRY_RETRY_WINDOW_MS < now) continue;
+    const existingPlayer = room.players.find((entry) => entry.id === record.playerId);
+    if (!existingPlayer) continue;
+    const existingSession = [...sessions.values()].find(
+      (entry) => entry.code === room.code && entry.playerId === record.playerId,
+    );
+    if (!existingSession || existingSession.lastSeenAt + PLAYER_TIMEOUT_MS < now) continue;
+
+    // A retry may land on a different process after the first response was
+    // lost. Rotate the bearer token instead of persisting a replayable token.
+    for (const [tokenHash, storedSession] of sessions) {
+      if (storedSession.code === room.code && storedSession.playerId === record.playerId) {
+        sessions.delete(tokenHash);
+      }
+    }
+    const session = addSession(room, record.playerId);
+    room.updatedAt = now;
+    await persistRoom(room);
+    return {
+      playerId: record.playerId,
+      sessionToken: session.token,
+      room: publicRoom(room, record.playerId),
+    };
+  }
+  return undefined;
+}
+
+function rememberEntryRequest(
+  room: StoredBattleRoom,
+  kind: StoredEntryRequest["kind"],
+  requestId: string | undefined,
+  playerId: string,
+) {
+  if (!requestId) return;
+  room.entryRequests.push({ requestId, kind, playerId, createdAt: clock() });
+  if (room.entryRequests.length > MAX_ENTRY_REQUESTS) {
+    room.entryRequests.splice(0, room.entryRequests.length - MAX_ENTRY_REQUESTS);
+  }
+}
+
+export function createRoom(name: string, requestId?: string) {
+  return withStoreOperation(() => createRoomUnlocked(name, requestId));
+}
+
+async function createRoomUnlocked(name: string, requestId?: string) {
   await ensureLoaded();
+  const normalizedRequestId = validEntryRequestId(requestId);
+  const replayed = await replayEntryRequest("create", normalizedRequestId);
+  if (replayed) return replayed;
   const host = player(name, 0, true);
   const room: StoredBattleRoom = {
     code: roomCode(),
@@ -650,23 +725,33 @@ async function createRoomUnlocked(name: string) {
     startedPlayerIds: [host.id],
     sessions: [],
     networkShotOutcomes: [],
+    entryRequests: [],
   };
   rooms.set(room.code, room);
   const session = addSession(room, host.id);
+  rememberEntryRequest(room, "create", normalizedRequestId, host.id);
   await persistRoom(room);
-  return { playerId: host.id, sessionToken: session.token, room: publicRoom(room, host.id) };
+  return {
+    playerId: host.id,
+    sessionToken: session.token,
+    room: publicRoom(room, host.id),
+  };
 }
 
-export function joinRoom(code: string, name: string) {
-  return withStoreOperation(() => joinRoomUnlocked(code, name));
+export function joinRoom(code: string, name: string, requestId?: string) {
+  return withStoreOperation(() => joinRoomUnlocked(code, name, requestId));
 }
 
-async function joinRoomUnlocked(code: string, name: string) {
+async function joinRoomUnlocked(code: string, name: string, requestId?: string) {
   await ensureLoaded();
+  const normalizedCode = code.toUpperCase();
+  const normalizedRequestId = validEntryRequestId(requestId);
+  const replayed = await replayEntryRequest("join", normalizedRequestId, normalizedCode);
+  if (replayed) return replayed;
   // Joining must also process overdue durable leases, so disconnected players
   // cannot consume markers or the room capacity until another state request.
   await sweepExpiredPlayersUnlocked(clock());
-  const room = rooms.get(code.toUpperCase());
+  const room = rooms.get(normalizedCode);
   if (!room || room.players.length === 0) throw new Error("ROOM_NOT_FOUND");
   if (refresh(room)) await persistRoom(room);
   if (!rooms.has(room.code)) {
@@ -683,8 +768,13 @@ async function joinRoomUnlocked(code: string, name: string) {
   room.startedPlayerIds.push(joined.id);
   room.updatedAt = clock();
   const session = addSession(room, joined.id);
+  rememberEntryRequest(room, "join", normalizedRequestId, joined.id);
   await persistRoom(room);
-  return { playerId: joined.id, sessionToken: session.token, room: publicRoom(room, joined.id) };
+  return {
+    playerId: joined.id,
+    sessionToken: session.token,
+    room: publicRoom(room, joined.id),
+  };
 }
 
 export function getRoom(code: string, token: string) {
@@ -702,6 +792,23 @@ export function authenticateBattleSession(code: string, token: string) {
     renewPresence(authorized);
     await persistRoom(authorized.room);
     return { roomCode: authorized.room.code, playerId: authorized.playerId };
+  });
+}
+
+/**
+ * Returns the viewer-filtered room snapshot without renewing presence. Socket
+ * fan-out uses this after a combat mutation so an opponent's targeted effects
+ * are never disclosed to other players and a state push cannot keep an idle
+ * lease alive.
+ */
+export function getPublicBattleSnapshot(code: string, token: string) {
+  return withStoreOperation(async () => {
+    // Persist disconnect/expiry transitions, but never call renewPresence.
+    const authorized = await authorizedRoom(code, token);
+    return {
+      playerId: authorized.playerId,
+      room: publicRoom(authorized.room, authorized.playerId),
+    };
   });
 }
 

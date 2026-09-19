@@ -22,10 +22,16 @@ export const HealthCheckResponse = zod.object({
  */
 export const createBattleRoomBodyNameMax = 18;
 
+export const createBattleRoomBodyRequestIdMin = 16;
+export const createBattleRoomBodyRequestIdMax = 128;
+
+
+export const createBattleRoomBodyRequestIdRegExp = new RegExp('^[A-Za-z0-9._:-]+$');
 
 
 export const CreateBattleRoomBody = zod.object({
-  "name": zod.string().min(1).max(createBattleRoomBodyNameMax)
+  "name": zod.string().min(1).max(createBattleRoomBodyNameMax),
+  "requestId": zod.string().min(createBattleRoomBodyRequestIdMin).max(createBattleRoomBodyRequestIdMax).regex(createBattleRoomBodyRequestIdRegExp).optional()
 })
 
 export const createBattleRoomResponseRoomPlayersItemHpMin = 0;
@@ -76,10 +82,16 @@ export const JoinBattleRoomParams = zod.object({
 
 export const joinBattleRoomBodyNameMax = 18;
 
+export const joinBattleRoomBodyRequestIdMin = 16;
+export const joinBattleRoomBodyRequestIdMax = 128;
+
+
+export const joinBattleRoomBodyRequestIdRegExp = new RegExp('^[A-Za-z0-9._:-]+$');
 
 
 export const JoinBattleRoomBody = zod.object({
-  "name": zod.string().min(1).max(joinBattleRoomBodyNameMax)
+  "name": zod.string().min(1).max(joinBattleRoomBodyNameMax),
+  "requestId": zod.string().min(joinBattleRoomBodyRequestIdMin).max(joinBattleRoomBodyRequestIdMax).regex(joinBattleRoomBodyRequestIdRegExp).optional()
 })
 
 export const joinBattleRoomResponseRoomPlayersItemHpMin = 0;

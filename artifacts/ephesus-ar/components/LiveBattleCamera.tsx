@@ -4,44 +4,19 @@ import Constants from "expo-constants";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImageManipulator from "expo-image-manipulator";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AppState, type AppStateStatus, StyleSheet, View } from "react-native";
+import { AppState, Platform, type AppStateStatus, StyleSheet, View } from "react-native";
 
 import type { LiveBattleCameraProps } from "./camera-types";
 import { useI18n } from "@/hooks/useI18n";
 import { cameraFacingLabel, uiText } from "@/lib/i18n";
 import {
   CAMERA_PERFORMANCE_CONFIG,
+  chooseAnalysisPictureSize,
+  nextCameraCaptureDelayMs,
   nextFasterCameraProfile,
   nextSlowerCameraProfile,
   selectCameraPerformanceProfile,
-  type CameraPerformanceConfig,
 } from "@/lib/camera-performance";
-
-function choosePictureSize(sizes: string[], viewport: { width: number; height: number }, config: CameraPerformanceConfig) {
-  const viewportAspect = viewport.width > 0 && viewport.height > 0
-    ? viewport.width / viewport.height
-    : 9 / 16;
-  // Camera stills are normally reported in landscape sensor orientation even
-  // while the app is portrait. Match the sensor aspect, not the cropped UI.
-  const targetAspect = viewportAspect < 1 ? 1 / viewportAspect : viewportAspect;
-  const parsed = sizes
-    .map((size) => {
-      const [width, height] = size.split("x").map(Number);
-      return { size, width, height, area: width * height, aspect: width / height };
-    })
-    .filter((size) => size.width > 0 && size.height > 0 && Number.isFinite(size.area));
-  if (!parsed.length) return undefined;
-
-  const bounded = parsed.filter((size) => size.area >= config.minCaptureArea && size.area <= config.maxCaptureArea);
-  const candidates = bounded.length ? bounded : parsed;
-  return [...candidates].sort((left, right) => {
-    const leftScore = Math.abs(Math.log(left.aspect / targetAspect)) * 3
-      + Math.abs(left.area - config.targetCaptureArea) / config.targetCaptureArea;
-    const rightScore = Math.abs(Math.log(right.aspect / targetAspect)) * 3
-      + Math.abs(right.area - config.targetCaptureArea) / config.targetCaptureArea;
-    return leftScore - rightScore;
-  })[0]?.size;
-}
 
 function base64ToBytes(base64: string): Uint8Array {
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -78,14 +53,15 @@ export default function LiveBattleCamera({
   const requestedKeyRef = useRef<number | null>(null);
   const activeRef = useRef(AppState.currentState === "active");
   const viewportRef = useRef({ width: 0, height: 0 });
-  const availablePictureSizesRef = useRef<string[]>([]);
   const initialProfileRef = useRef(selectCameraPerformanceProfile(Constants.deviceYearClass));
   const [performanceProfile, setPerformanceProfile] = useState(initialProfileRef.current);
   const slowCaptureStreakRef = useRef(0);
   const fastCaptureStreakRef = useRef(0);
   const [permission, requestPermission] = useCameraPermissions();
   const [cameraReady, setCameraReady] = useState(false);
+  const [layoutReady, setLayoutReady] = useState(false);
   const [pictureSize, setPictureSize] = useState<string | undefined>();
+  const pictureSizeConfiguredRef = useRef(false);
   const [appActive, setAppActive] = useState(AppState.currentState === "active");
 
   onFrameRef.current = onFrame;
@@ -118,8 +94,8 @@ export default function LiveBattleCamera({
     };
   }, [permission?.granted, requestCamera, restartKey]);
 
-  const capture = useCallback(async () => {
-    if (!onFrameRef.current) return;
+  const capture = useCallback(async (): Promise<number | null> => {
+    if (!onFrameRef.current) return null;
     if (
       !mountedRef.current ||
       !activeRef.current ||
@@ -129,7 +105,7 @@ export default function LiveBattleCamera({
       viewportRef.current.width <= 0 ||
       viewportRef.current.height <= 0
     ) {
-      return;
+      return null;
     }
     capturingRef.current = true;
     const startedAt = Date.now();
@@ -141,12 +117,15 @@ export default function LiveBattleCamera({
       const photo = await cameraRef.current.takePictureAsync({
         base64: false,
         quality: performanceConfig.photoQuality,
+        // Keep Expo's native/EXIF orientation normalization. Without it,
+        // Android sensor orientation can rotate the crop and move the marker
+        // away from the user's aim, especially on Huawei camera HALs.
         skipProcessing: false,
         shutterSound: false,
       });
       photoUri = photo.uri;
       if (generation !== generationRef.current || !activeRef.current) {
-        return;
+        return null;
       }
       const targetAspect = viewportRef.current.width / viewportRef.current.height;
       const sourceAspect = photo.width / photo.height;
@@ -169,7 +148,7 @@ export default function LiveBattleCamera({
       );
       resizedUri = resized.uri;
       if (generation !== generationRef.current || !activeRef.current) {
-        return;
+        return null;
       }
       if (!resized.base64) {
          throw new Error(t("errorMessage"));
@@ -196,7 +175,10 @@ export default function LiveBattleCamera({
       }
     } finally {
       capturingRef.current = false;
-      await Promise.all(
+      // Temporary files are not part of the next-frame critical path. Waiting
+      // for storage cleanup here serialized native camera captures and made
+      // the preview appear to lag under pressure.
+      void Promise.all(
         [photoUri, resizedUri].filter((uri): uri is string => !!uri).map((uri) =>
           FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => undefined),
         ),
@@ -220,6 +202,7 @@ export default function LiveBattleCamera({
         slowCaptureStreakRef.current = 0;
         fastCaptureStreakRef.current = 0;
       }
+      return elapsed;
     }
    }, [locale, performanceProfile, t]);
 
@@ -241,6 +224,8 @@ export default function LiveBattleCamera({
     ++generationRef.current;
     readyRef.current = false;
     setCameraReady(false);
+    setLayoutReady(false);
+    pictureSizeConfiguredRef.current = false;
     setPictureSize(undefined);
     if (permission?.granted && appActive) {
        onStatusRef.current({ state: "requesting", message: `${cameraFacingLabel(locale, facing)} · ${t("waiting")}` });
@@ -248,21 +233,62 @@ export default function LiveBattleCamera({
   }, [appActive, facing, locale, permission?.granted, restartKey, t]);
 
   useEffect(() => {
-    if (!availablePictureSizesRef.current.length) return;
-    const selectedSize = choosePictureSize(
-      availablePictureSizesRef.current,
-      viewportRef.current,
-      CAMERA_PERFORMANCE_CONFIG[performanceProfile],
-    );
-    if (selectedSize) setPictureSize(selectedSize);
-  }, [performanceProfile]);
+    if (
+      !permission?.granted ||
+      !cameraReady ||
+      !layoutReady ||
+      !activeRef.current ||
+      pictureSizeConfiguredRef.current
+    ) {
+      return;
+    }
+
+    const generation = generationRef.current;
+    void cameraRef.current?.getAvailablePictureSizesAsync().then((sizes) => {
+      if (!mountedRef.current || generation !== generationRef.current) return;
+      const selectedSize = chooseAnalysisPictureSize(sizes, viewportRef.current);
+      pictureSizeConfiguredRef.current = true;
+      if (selectedSize) {
+        // The only intentional still-mode rebind in a camera session.
+        setPictureSize(selectedSize);
+        readyRef.current = true;
+      } else {
+        // Do not select a muddy 640x480 fallback when this HAL has no
+        // bounded 1080p-class mode; retain Expo's validated native default.
+        readyRef.current = true;
+      }
+    }).catch(() => {
+      if (!mountedRef.current || generation !== generationRef.current) return;
+      pictureSizeConfiguredRef.current = true;
+      readyRef.current = true;
+    });
+  }, [cameraReady, layoutReady, permission?.granted]);
 
   useEffect(() => {
     if (!permission?.granted || !cameraReady || !activeRef.current) {
       return;
     }
-    const timer = setInterval(() => void capture(), CAMERA_PERFORMANCE_CONFIG[performanceProfile].intervalMs);
-    return () => clearInterval(timer);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const scheduleNextCapture = (delayMs: number) => {
+      if (cancelled) return;
+      timer = setTimeout(async () => {
+        if (cancelled) return;
+        const elapsed = await capture();
+        if (cancelled) return;
+        const delay = elapsed === null
+          ? CAMERA_PERFORMANCE_CONFIG[performanceProfile].intervalMs
+          : nextCameraCaptureDelayMs(performanceProfile, elapsed);
+        scheduleNextCapture(delay);
+      }, delayMs);
+    };
+
+    scheduleNextCapture(0);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [cameraReady, capture, facing, performanceProfile, permission?.granted, restartKey]);
 
   return (
@@ -270,6 +296,7 @@ export default function LiveBattleCamera({
       style={StyleSheet.absoluteFill}
       onLayout={(event) => {
         viewportRef.current = event.nativeEvent.layout;
+        setLayoutReady(event.nativeEvent.layout.width > 0 && event.nativeEvent.layout.height > 0);
       }}
     >
       {permission?.granted && appActive ? (
@@ -283,30 +310,19 @@ export default function LiveBattleCamera({
           // 0 is the unzoomed native lens position. Digital zoom belongs only
           // to the battle scope animation, not to the camera preview.
           zoom={0}
-          // Expo 57's iOS "on" mode locks after one focus pass. Leave the
-          // default/off mode so the rear and front lenses keep continuous AF.
-          autofocus="off"
-          pictureSize={pictureSize}
-          // Do not force a ratio: Expo Go keeps the FILL preview while the
-          // bounded analysis capture below crops to the actual viewport aspect.
+           // Use one stable, bounded still mode for analysis. This is selected
+           // only after layout/readiness and never changes with the profile.
+          autofocus={Platform.OS === "android" ? "on" : "off"}
+           pictureSize={pictureSize}
           animateShutter={false}
           onCameraReady={() => {
             const generation = generationRef.current;
-            void cameraRef.current?.getAvailablePictureSizesAsync().then((sizes) => {
-              if (!mountedRef.current || generation !== generationRef.current) return;
-              availablePictureSizesRef.current = sizes;
-              const selectedSize = choosePictureSize(sizes, viewportRef.current, CAMERA_PERFORMANCE_CONFIG[performanceProfile]);
-              if (selectedSize) setPictureSize(selectedSize);
-              readyRef.current = true;
-              setCameraReady(true);
-               onStatusRef.current({ state: "live", message: `${t("cameraReady")} · ${cameraFacingLabel(locale, facing)}` });
-            }).catch(() => {
-              if (!mountedRef.current || generation !== generationRef.current) return;
-              // Keep Expo's supported default if size discovery is unavailable.
-              readyRef.current = true;
-              setCameraReady(true);
-               onStatusRef.current({ state: "live", message: `${t("cameraReady")} · ${cameraFacingLabel(locale, facing)}` });
-            });
+             if (!mountedRef.current || generation !== generationRef.current) return;
+              // Wait for the one-time analysis-size selection. A callback
+              // after that intentional rebind releases the capture gate.
+              readyRef.current = pictureSizeConfiguredRef.current;
+             setCameraReady(true);
+             onStatusRef.current({ state: "live", message: `${t("cameraReady")} · ${cameraFacingLabel(locale, facing)}` });
           }}
           onMountError={() => {
             readyRef.current = false;

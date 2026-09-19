@@ -234,12 +234,18 @@ importers:
       expo-camera:
         specifier: ~57.0.4
         version: 57.0.4(expo@57.0.20)(react-native-web@0.21.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.7)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
+      expo-crypto:
+        specifier: ~57.0.3
+        version: 57.0.3(expo@57.0.20)
       expo-file-system:
         specifier: ~57.0.6
         version: 57.0.6(expo@57.0.20)(react-native@0.86.3(@babel/core@7.29.7)(@types/react@19.2.18)(react@19.2.3))
       expo-image-manipulator:
         specifier: ~57.0.16
         version: 57.0.16(expo@57.0.20)
+      expo-keep-awake:
+        specifier: ~57.0.1
+        version: 57.0.1(expo@57.0.20)(react@19.2.3)
       jpeg-js:
         specifier: ^0.4.4
         version: 0.4.4
@@ -570,7 +576,7 @@ importers:
     devDependencies:
       orval:
         specifier: ^8.23.0
-        version: 8.23.0(prettier@3.9.6)(typescript@6.0.3)
+        version: 8.23.0(prettier@3.9.6)(typescript@5.9.3)
 
   lib/api-zod:
     dependencies:
@@ -3064,6 +3070,11 @@ packages:
     peerDependencies:
       expo: '*'
       react-native: '*'
+
+  expo-crypto@57.0.3:
+    resolution: {integrity: sha512-SAWqEfF37nc8ot7bXsVmu9AFYwQdC2kGvH/eNAHiR3bmlcf1Vv8wu9AnGKT+a90r3T8YfwMpZP4QAYlo4vCn9w==}
+    peerDependencies:
+      expo: '*'
 
   expo-file-system@57.0.6:
     resolution: {integrity: sha512-pm8PMYEW6BnVOCBJ7df9FcDmQtE1tqImuYphlfYe1ipQRLYtdCayRczJcbKIsnB3mqEyp4gC2gWmMbsAsAOjVg==}
@@ -6113,23 +6124,23 @@ snapshots:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.1
 
-  '@orval/angular@8.23.0(typescript@6.0.3)':
+  '@orval/angular@8.23.0(typescript@5.9.3)':
     dependencies:
-      '@orval/core': 8.23.0(typescript@6.0.3)
+      '@orval/core': 8.23.0(typescript@5.9.3)
     transitivePeerDependencies:
       - '@faker-js/faker'
       - supports-color
       - typescript
 
-  '@orval/axios@8.23.0(typescript@6.0.3)':
+  '@orval/axios@8.23.0(typescript@5.9.3)':
     dependencies:
-      '@orval/core': 8.23.0(typescript@6.0.3)
+      '@orval/core': 8.23.0(typescript@5.9.3)
     transitivePeerDependencies:
       - '@faker-js/faker'
       - supports-color
       - typescript
 
-  '@orval/core@8.23.0(typescript@6.0.3)':
+  '@orval/core@8.23.0(typescript@5.9.3)':
     dependencies:
       '@scalar/openapi-types': 0.8.0
       acorn: 8.18.0
@@ -6142,88 +6153,88 @@ snapshots:
       jsesc: 3.1.0
       remeda: 2.39.0
       tinyglobby: 0.2.17
-      typedoc: 0.28.20(typescript@6.0.3)
+      typedoc: 0.28.20(typescript@5.9.3)
     transitivePeerDependencies:
       - supports-color
       - typescript
 
-  '@orval/effect@8.23.0(typescript@6.0.3)':
+  '@orval/effect@8.23.0(typescript@5.9.3)':
     dependencies:
-      '@orval/core': 8.23.0(typescript@6.0.3)
+      '@orval/core': 8.23.0(typescript@5.9.3)
       remeda: 2.39.0
     transitivePeerDependencies:
       - '@faker-js/faker'
       - supports-color
       - typescript
 
-  '@orval/fetch@8.23.0(typescript@6.0.3)':
+  '@orval/fetch@8.23.0(typescript@5.9.3)':
     dependencies:
-      '@orval/core': 8.23.0(typescript@6.0.3)
+      '@orval/core': 8.23.0(typescript@5.9.3)
     transitivePeerDependencies:
       - '@faker-js/faker'
       - supports-color
       - typescript
 
-  '@orval/hono@8.23.0(typescript@6.0.3)':
+  '@orval/hono@8.23.0(typescript@5.9.3)':
     dependencies:
-      '@orval/core': 8.23.0(typescript@6.0.3)
-      '@orval/zod': 8.23.0(typescript@6.0.3)
+      '@orval/core': 8.23.0(typescript@5.9.3)
+      '@orval/zod': 8.23.0(typescript@5.9.3)
       fs-extra: 11.4.0
     optionalDependencies:
-      typescript: 6.0.3
+      typescript: 5.9.3
     transitivePeerDependencies:
       - '@faker-js/faker'
       - supports-color
 
-  '@orval/mcp@8.23.0(typescript@6.0.3)':
+  '@orval/mcp@8.23.0(typescript@5.9.3)':
     dependencies:
-      '@orval/core': 8.23.0(typescript@6.0.3)
-      '@orval/fetch': 8.23.0(typescript@6.0.3)
-      '@orval/zod': 8.23.0(typescript@6.0.3)
+      '@orval/core': 8.23.0(typescript@5.9.3)
+      '@orval/fetch': 8.23.0(typescript@5.9.3)
+      '@orval/zod': 8.23.0(typescript@5.9.3)
     transitivePeerDependencies:
       - '@faker-js/faker'
       - supports-color
       - typescript
 
-  '@orval/mock@8.23.0(typescript@6.0.3)':
+  '@orval/mock@8.23.0(typescript@5.9.3)':
     dependencies:
-      '@orval/core': 8.23.0(typescript@6.0.3)
+      '@orval/core': 8.23.0(typescript@5.9.3)
       remeda: 2.39.0
     transitivePeerDependencies:
       - '@faker-js/faker'
       - supports-color
       - typescript
 
-  '@orval/query@8.23.0(typescript@6.0.3)':
+  '@orval/query@8.23.0(typescript@5.9.3)':
     dependencies:
-      '@orval/core': 8.23.0(typescript@6.0.3)
-      '@orval/fetch': 8.23.0(typescript@6.0.3)
+      '@orval/core': 8.23.0(typescript@5.9.3)
+      '@orval/fetch': 8.23.0(typescript@5.9.3)
       remeda: 2.39.0
     transitivePeerDependencies:
       - '@faker-js/faker'
       - supports-color
       - typescript
 
-  '@orval/solid-start@8.23.0(typescript@6.0.3)':
+  '@orval/solid-start@8.23.0(typescript@5.9.3)':
     dependencies:
-      '@orval/core': 8.23.0(typescript@6.0.3)
+      '@orval/core': 8.23.0(typescript@5.9.3)
     transitivePeerDependencies:
       - '@faker-js/faker'
       - supports-color
       - typescript
 
-  '@orval/swr@8.23.0(typescript@6.0.3)':
+  '@orval/swr@8.23.0(typescript@5.9.3)':
     dependencies:
-      '@orval/core': 8.23.0(typescript@6.0.3)
-      '@orval/fetch': 8.23.0(typescript@6.0.3)
+      '@orval/core': 8.23.0(typescript@5.9.3)
+      '@orval/fetch': 8.23.0(typescript@5.9.3)
     transitivePeerDependencies:
       - '@faker-js/faker'
       - supports-color
       - typescript
 
-  '@orval/zod@8.23.0(typescript@6.0.3)':
+  '@orval/zod@8.23.0(typescript@5.9.3)':
     dependencies:
-      '@orval/core': 8.23.0(typescript@6.0.3)
+      '@orval/core': 8.23.0(typescript@5.9.3)
       jsesc: 3.1.0
       remeda: 2.39.0
     transitivePeerDependencies:
@@ -8190,6 +8201,10 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  expo-crypto@57.0.3(expo@57.0.20):
+    dependencies:
+      expo: 57.0.20(@babel/core@7.29.7)(@expo/metro-runtime@57.0.15)(expo-router@57.0.19)(react-dom@19.2.3(react@19.2.3))(react-native-web@0.21.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-native-worklets@0.10.1(@babel/core@7.29.7)(react-native@0.86.3(@babel/core@7.29.7)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.7)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)(typescript@6.0.3)
+
   expo-file-system@57.0.6(expo@57.0.20)(react-native@0.86.3(@babel/core@7.29.7)(@types/react@19.2.18)(react@19.2.3)):
     dependencies:
       expo: 57.0.20(@babel/core@7.29.7)(@expo/metro-runtime@57.0.15)(expo-router@57.0.19)(react-dom@19.2.3(react@19.2.3))(react-native-web@0.21.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-native-worklets@0.10.1(@babel/core@7.29.7)(react-native@0.86.3(@babel/core@7.29.7)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.7)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)(typescript@6.0.3)
@@ -9375,21 +9390,21 @@ snapshots:
       strip-ansi: 5.2.0
       wcwidth: 1.0.1
 
-  orval@8.23.0(prettier@3.9.6)(typescript@6.0.3):
+  orval@8.23.0(prettier@3.9.6)(typescript@5.9.3):
     dependencies:
       '@commander-js/extra-typings': 15.0.0(commander@15.0.0)
-      '@orval/angular': 8.23.0(typescript@6.0.3)
-      '@orval/axios': 8.23.0(typescript@6.0.3)
-      '@orval/core': 8.23.0(typescript@6.0.3)
-      '@orval/effect': 8.23.0(typescript@6.0.3)
-      '@orval/fetch': 8.23.0(typescript@6.0.3)
-      '@orval/hono': 8.23.0(typescript@6.0.3)
-      '@orval/mcp': 8.23.0(typescript@6.0.3)
-      '@orval/mock': 8.23.0(typescript@6.0.3)
-      '@orval/query': 8.23.0(typescript@6.0.3)
-      '@orval/solid-start': 8.23.0(typescript@6.0.3)
-      '@orval/swr': 8.23.0(typescript@6.0.3)
-      '@orval/zod': 8.23.0(typescript@6.0.3)
+      '@orval/angular': 8.23.0(typescript@5.9.3)
+      '@orval/axios': 8.23.0(typescript@5.9.3)
+      '@orval/core': 8.23.0(typescript@5.9.3)
+      '@orval/effect': 8.23.0(typescript@5.9.3)
+      '@orval/fetch': 8.23.0(typescript@5.9.3)
+      '@orval/hono': 8.23.0(typescript@5.9.3)
+      '@orval/mcp': 8.23.0(typescript@5.9.3)
+      '@orval/mock': 8.23.0(typescript@5.9.3)
+      '@orval/query': 8.23.0(typescript@5.9.3)
+      '@orval/solid-start': 8.23.0(typescript@5.9.3)
+      '@orval/swr': 8.23.0(typescript@5.9.3)
+      '@orval/zod': 8.23.0(typescript@5.9.3)
       '@scalar/json-magic': 0.12.19
       '@scalar/openapi-parser': 0.28.11
       '@scalar/openapi-types': 0.8.0
@@ -9403,9 +9418,9 @@ snapshots:
       js-yaml: 4.3.0
       remeda: 2.39.0
       string-argv: 0.3.2
-      typedoc: 0.28.20(typescript@6.0.3)
-      typedoc-plugin-coverage: 4.0.3(typedoc@0.28.20(typescript@6.0.3))
-      typedoc-plugin-markdown: 4.12.0(typedoc@0.28.20(typescript@6.0.3))
+      typedoc: 0.28.20(typescript@5.9.3)
+      typedoc-plugin-coverage: 4.0.3(typedoc@0.28.20(typescript@5.9.3))
+      typedoc-plugin-markdown: 4.12.0(typedoc@0.28.20(typescript@5.9.3))
     optionalDependencies:
       prettier: 3.9.6
     transitivePeerDependencies:
@@ -10327,21 +10342,21 @@ snapshots:
       media-typer: 1.1.1
       mime-types: 3.0.2
 
-  typedoc-plugin-coverage@4.0.3(typedoc@0.28.20(typescript@6.0.3)):
+  typedoc-plugin-coverage@4.0.3(typedoc@0.28.20(typescript@5.9.3)):
     dependencies:
-      typedoc: 0.28.20(typescript@6.0.3)
+      typedoc: 0.28.20(typescript@5.9.3)
 
-  typedoc-plugin-markdown@4.12.0(typedoc@0.28.20(typescript@6.0.3)):
+  typedoc-plugin-markdown@4.12.0(typedoc@0.28.20(typescript@5.9.3)):
     dependencies:
-      typedoc: 0.28.20(typescript@6.0.3)
+      typedoc: 0.28.20(typescript@5.9.3)
 
-  typedoc@0.28.20(typescript@6.0.3):
+  typedoc@0.28.20(typescript@5.9.3):
     dependencies:
       '@gerrit0/mini-shiki': 3.23.0
       lunr: 2.3.9
       markdown-it: 14.3.0
       minimatch: 10.2.6
-      typescript: 6.0.3
+      typescript: 5.9.3
       yaml: 2.9.0
 
   typescript@5.9.3: {}

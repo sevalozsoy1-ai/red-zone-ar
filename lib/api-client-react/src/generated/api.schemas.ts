@@ -15,6 +15,12 @@ export interface BattleJoinInput {
      * @maxLength 18
      */
   name: string;
+  /**
+     * @minLength 16
+     * @maxLength 128
+     * @pattern ^[A-Za-z0-9._:-]+$
+     */
+  requestId?: string;
 }
 
 export interface BattleAccessInput { [key: string]: unknown }
