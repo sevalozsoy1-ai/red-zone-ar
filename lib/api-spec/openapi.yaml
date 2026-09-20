@@ -151,6 +151,28 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/BattleShotResult"
+  /battle/rooms/{code}/network-shots:
+    post:
+      operationId: fireNetworkBattleShot
+      tags: [battle]
+      summary: Submit an idempotent player-targeted network shot
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RoomCode"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NetworkBattleShotInput"
+      responses:
+        "200":
+          description: Server-verified idempotent network shot result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BattleShotResult"
 components:
   parameters:
     RoomCode:
@@ -190,6 +212,15 @@ components:
       required: [markerId, firedAt, weaponId, fireMode]
       properties:
         markerId: { type: integer, minimum: 0, maximum: 9 }
+        firedAt: { type: integer }
+        weaponId: { type: string, minLength: 1, maxLength: 32 }
+        fireMode: { type: string, enum: [primary, throw] }
+    NetworkBattleShotInput:
+      type: object
+      required: [shotId, targetPlayerId, firedAt, weaponId, fireMode]
+      properties:
+        shotId: { type: string, minLength: 16, maxLength: 128, pattern: "^[A-Za-z0-9._:-]+$" }
+        targetPlayerId: { type: string, minLength: 1, maxLength: 128 }
         firedAt: { type: integer }
         weaponId: { type: string, minLength: 1, maxLength: 32 }
         fireMode: { type: string, enum: [primary, throw] }

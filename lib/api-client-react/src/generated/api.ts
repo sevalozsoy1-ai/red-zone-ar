@@ -25,7 +25,8 @@ import type {
   BattleShotInput,
   BattleShotResult,
   GetBattleStateParams,
-  HealthStatus
+  HealthStatus,
+  NetworkBattleShotInput
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -643,5 +644,77 @@ export const useFireBattleShot = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getFireBattleShotMutationOptions(options));
+    }
+
+export const getFireNetworkBattleShotUrl = (code: string,) => {
+
+
+
+
+  return `/api/battle/rooms/${code}/network-shots`
+}
+
+/**
+ * @summary Submit an idempotent player-targeted network shot
+ */
+export const fireNetworkBattleShot = async (code: string,
+    networkBattleShotInput: NetworkBattleShotInput, options?: Parameters<typeof customFetch>[1]): Promise<BattleShotResult> => {
+
+  return customFetch<BattleShotResult>(getFireNetworkBattleShotUrl(code),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(networkBattleShotInput)
+  }
+);}
+
+
+
+
+
+export const getFireNetworkBattleShotMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof fireNetworkBattleShot>>, TError,{code: string;data: BodyType<NetworkBattleShotInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof fireNetworkBattleShot>>, TError,{code: string;data: BodyType<NetworkBattleShotInput>}, TContext> => {
+
+const mutationKey = ['fireNetworkBattleShot'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof fireNetworkBattleShot>>, {code: string;data: BodyType<NetworkBattleShotInput>}> = (props) => {
+          const {code,data} = props ?? {};
+
+          return  fireNetworkBattleShot(code,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type FireNetworkBattleShotMutationResult = NonNullable<Awaited<ReturnType<typeof fireNetworkBattleShot>>>
+    export type FireNetworkBattleShotMutationBody = BodyType<NetworkBattleShotInput>
+    export type FireNetworkBattleShotMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Submit an idempotent player-targeted network shot
+ */
+export const useFireNetworkBattleShot = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof fireNetworkBattleShot>>, TError,{code: string;data: BodyType<NetworkBattleShotInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof fireNetworkBattleShot>>,
+        TError,
+        {code: string;data: BodyType<NetworkBattleShotInput>},
+        TContext
+      > => {
+      return useMutation(getFireNetworkBattleShotMutationOptions(options));
     }
 

@@ -19,3 +19,5 @@ export * from './battleShotInputFireMode';
 export * from './battleShotResult';
 export * from './getBattleStateParams';
 export * from './healthStatus';
+export * from './networkBattleShotInput';
+export * from './networkBattleShotInputFireMode';

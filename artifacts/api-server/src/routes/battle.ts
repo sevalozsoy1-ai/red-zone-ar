@@ -3,6 +3,8 @@ import {
   CreateBattleRoomBody,
   FireBattleShotBody,
   FireBattleShotParams,
+  FireNetworkBattleShotBody,
+  FireNetworkBattleShotParams,
   GetBattleStateQueryParams,
   HeartbeatBattleRoomParams,
   JoinBattleRoomBody,
@@ -13,6 +15,7 @@ import {
 import {
   createRoom,
   fireShot,
+  fireShotByPlayerId,
   getRoom,
   heartbeatRoom,
   joinRoom,
@@ -99,6 +102,23 @@ router.post("/battle/rooms/:code/shots", async (req, res) => {
       params.data.code,
       bearerToken(req),
       body.data.markerId,
+      body.data.firedAt,
+      body.data.weaponId,
+      body.data.fireMode,
+    ));
+  } catch (error) { fail(res, error); }
+});
+
+router.post("/battle/rooms/:code/network-shots", async (req, res) => {
+  const params = FireNetworkBattleShotParams.safeParse(req.params);
+  const body = FireNetworkBattleShotBody.safeParse(req.body);
+  if (!params.success || !body.success) { res.status(400).json({ error: "INVALID_REQUEST" }); return; }
+  try {
+    res.json(await fireShotByPlayerId(
+      params.data.code,
+      bearerToken(req),
+      body.data.shotId,
+      body.data.targetPlayerId,
       body.data.firedAt,
       body.data.weaponId,
       body.data.fireMode,

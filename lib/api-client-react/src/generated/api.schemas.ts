@@ -48,6 +48,35 @@ export interface BattleShotInput {
   fireMode: BattleShotInputFireMode;
 }
 
+export type NetworkBattleShotInputFireMode = typeof NetworkBattleShotInputFireMode[keyof typeof NetworkBattleShotInputFireMode];
+
+
+export const NetworkBattleShotInputFireMode = {
+  primary: 'primary',
+  throw: 'throw',
+} as const;
+
+export interface NetworkBattleShotInput {
+  /**
+     * @minLength 16
+     * @maxLength 128
+     * @pattern ^[A-Za-z0-9._:-]+$
+     */
+  shotId: string;
+  /**
+     * @minLength 1
+     * @maxLength 128
+     */
+  targetPlayerId: string;
+  firedAt: number;
+  /**
+     * @minLength 1
+     * @maxLength 32
+     */
+  weaponId: string;
+  fireMode: NetworkBattleShotInputFireMode;
+}
+
 export type BattleEffectKind = typeof BattleEffectKind[keyof typeof BattleEffectKind];
 
 

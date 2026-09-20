@@ -540,8 +540,12 @@ function refresh(room: StoredBattleRoom, now = clock()) {
   }
 
   changed = finishIfComplete(room) || changed;
-  if (changed) room.updatedAt = now;
+  if (changed) touchRoom(room, now);
   return changed;
+}
+
+function touchRoom(room: StoredBattleRoom, at = clock()) {
+  room.updatedAt = Math.max(room.updatedAt + 1, at);
 }
 
 function publicRoom(room: StoredBattleRoom, viewerId: string): BattleRoom {
@@ -644,6 +648,7 @@ function renewPresence(authorized: {
   if (!player) throw new Error("UNAUTHORIZED");
   authorized.session.lastSeenAt = now;
   authorized.session.disconnectedAt = null;
+  if (!player.connected) touchRoom(authorized.room, now);
   player.connected = true;
 }
 function validEntryRequestId(requestId: string | undefined) {
@@ -679,7 +684,7 @@ async function replayEntryRequest(
       }
     }
     const session = addSession(room, record.playerId);
-    room.updatedAt = now;
+    touchRoom(room, now);
     await persistRoom(room);
     return {
       playerId: record.playerId,
@@ -766,7 +771,7 @@ async function joinRoomUnlocked(code: string, name: string, requestId?: string) 
   const joined = player(name, markerId, false);
   room.players.push(joined);
   room.startedPlayerIds.push(joined.id);
-  room.updatedAt = clock();
+  touchRoom(room);
   const session = addSession(room, joined.id);
   rememberEntryRequest(room, "join", normalizedRequestId, joined.id);
   await persistRoom(room);
@@ -847,6 +852,7 @@ async function startRoomUnlocked(code: string, token: string) {
   if (session.room.status !== "lobby") throw new Error("ROOM_STARTED");
   session.room.startedPlayerIds = session.room.players.map((entry) => entry.id);
   session.room.status = "active";
+  touchRoom(session.room);
   renewPresence(session);
   await persistRoom(session.room);
   return {
@@ -882,7 +888,7 @@ async function leaveRoomUnlocked(code: string, token: string) {
   }
 
   finishIfComplete(room);
-  room.updatedAt = clock();
+  touchRoom(room);
   await persistRoom(room);
 }
 
@@ -1010,7 +1016,9 @@ async function fireShotUnlocked(
   else if (!shooter?.alive) { accepted = false; reason = "Yeniden doğmayı bekliyorsun"; }
   else if (!target || target.id === playerId) { accepted = false; reason = "Geçersiz hedef"; }
   else if (!target.alive || target.lives <= 0) { accepted = false; reason = "Hedef aktif değil"; }
-  else if (weapon.action === "grenade" && fireMode !== "primary") { accepted = false; reason = "El bombası atış türü geçersiz"; }
+  else if (!target.connected) { accepted = false; reason = "Hedef bağlantısı yok"; }
+  // Grenades use the explicit throw mode, while accepting primary for
+  // already-shipped clients that predate the throw contract.
   else if (weapon.action !== "grenade" && weaponId === "knife" && fireMode !== "primary" && fireMode !== "throw") {
     accepted = false; reason = "Bıçak atış türü geçersiz";
   }
@@ -1046,6 +1054,9 @@ async function fireShotUnlocked(
       });
     }
     refresh(room);
+    // Every accepted combat mutation advances the authoritative room revision,
+    // even when multiple shots arrive within the same millisecond.
+    touchRoom(room, now);
   }
   // Rejected but authenticated attempts are still a heartbeat; persist the
   // renewed lease as well as accepted combat mutations atomically.
@@ -1102,6 +1113,7 @@ async function sweepExpiredPlayersUnlocked(now: number): Promise<BattleRoom[]> {
       room.players = room.players.filter((entry) => !expiredIds.has(entry.id));
       room.effects = room.effects.filter((effect) => !expiredIds.has(effect.targetId));
       transferHost(room);
+      touchRoom(room, deadline);
       // Evaluate at the logical cohort deadline. A delayed sweep therefore
       // preserves the same respawn/effect/result ordering as live timers.
       refresh(room, deadline);

@@ -347,3 +347,74 @@ export const FireBattleShotResponse = zod.object({
 })
 
 
+/**
+ * @summary Submit an idempotent player-targeted network shot
+ */
+export const fireNetworkBattleShotPathCodeRegExp = new RegExp('^[A-Z0-9]{6}$');
+
+
+export const FireNetworkBattleShotParams = zod.object({
+  "code": zod.coerce.string().regex(fireNetworkBattleShotPathCodeRegExp)
+})
+
+export const fireNetworkBattleShotBodyShotIdMin = 16;
+export const fireNetworkBattleShotBodyShotIdMax = 128;
+
+
+export const fireNetworkBattleShotBodyShotIdRegExp = new RegExp('^[A-Za-z0-9._:-]+$');
+export const fireNetworkBattleShotBodyTargetPlayerIdMax = 128;
+
+export const fireNetworkBattleShotBodyWeaponIdMax = 32;
+
+
+
+export const FireNetworkBattleShotBody = zod.object({
+  "shotId": zod.string().min(fireNetworkBattleShotBodyShotIdMin).max(fireNetworkBattleShotBodyShotIdMax).regex(fireNetworkBattleShotBodyShotIdRegExp),
+  "targetPlayerId": zod.string().min(1).max(fireNetworkBattleShotBodyTargetPlayerIdMax),
+  "firedAt": zod.number().int(),
+  "weaponId": zod.string().min(1).max(fireNetworkBattleShotBodyWeaponIdMax),
+  "fireMode": zod.enum(['primary', 'throw'])
+})
+
+export const fireNetworkBattleShotResponseDamageMin = 0;
+
+export const fireNetworkBattleShotResponseRoomPlayersItemHpMin = 0;
+export const fireNetworkBattleShotResponseRoomPlayersItemHpMax = 100;
+
+
+
+export const FireNetworkBattleShotResponse = zod.object({
+  "accepted": zod.boolean(),
+  "reason": zod.string(),
+  "shooterId": zod.string(),
+  "targetId": zod.string(),
+  "damage": zod.number().int().min(fireNetworkBattleShotResponseDamageMin),
+  "eliminated": zod.boolean(),
+  "room": zod.object({
+  "code": zod.string(),
+  "status": zod.enum(['lobby', 'active', 'finished']),
+  "winnerPlayerId": zod.string().nullable(),
+  "draw": zod.boolean(),
+  "players": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "markerId": zod.number().int(),
+  "markerColor": zod.string(),
+  "lives": zod.number().int(),
+  "hp": zod.number().int().min(fireNetworkBattleShotResponseRoomPlayersItemHpMin).max(fireNetworkBattleShotResponseRoomPlayersItemHpMax),
+  "alive": zod.boolean(),
+  "respawnAt": zod.number().int(),
+  "isHost": zod.boolean(),
+  "connected": zod.boolean()
+})),
+  "effects": zod.array(zod.object({
+  "id": zod.string(),
+  "kind": zod.enum(['frag', 'flashbang', 'smoke']),
+  "expiresAt": zod.number().int()
+})),
+  "maxPlayers": zod.number().int(),
+  "updatedAt": zod.number().int()
+})
+})
+
+

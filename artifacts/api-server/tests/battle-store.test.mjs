@@ -144,6 +144,54 @@ test("rejects network self-targets and deduplicates repeated shot ids", async ()
   assert.equal((await getRoom(host.room.code, opponent.sessionToken)).room.players.find((player) => player.id === opponent.playerId).hp, 82);
 });
 
+test("deduplicates concurrent socket and HTTP delivery of the same network shot", async () => {
+  const { host, opponent } = await activeRoom();
+  const shotId = "34343434-3434-4434-8434-343434343434";
+  const before = (await getRoom(host.room.code, host.sessionToken)).room.updatedAt;
+  const send = () => fireShotByPlayerId(
+    host.room.code,
+    host.sessionToken,
+    shotId,
+    opponent.playerId,
+    now,
+    "m4a1",
+    "primary",
+  );
+
+  const [first, second] = await Promise.all([send(), send()]);
+  assert.deepEqual([first.duplicate, second.duplicate].sort(), [false, true]);
+  const room = (await getRoom(host.room.code, opponent.sessionToken)).room;
+  assert.equal(room.players.find((player) => player.id === opponent.playerId).hp, 82);
+  assert.ok(room.updatedAt > before);
+
+  const joined = await joinRoom(host.room.code, "revision-opponent", "revision-opponent-request");
+  assert.ok(joined.room.updatedAt > room.updatedAt);
+});
+
+test("rejects disconnected targets on marker and network shot paths", async () => {
+  const { host, opponent } = await activeRoom();
+  const targetMarker = opponent.room.players.find((player) => player.id === opponent.playerId).markerId;
+  now += LEASE_TIMEOUT_MS + 1;
+
+  const markerShot = await fireShot(host.room.code, host.sessionToken, targetMarker, now, "m4a1", "primary");
+  assert.equal(markerShot.accepted, false);
+  assert.equal(markerShot.reason, "Hedef bağlantısı yok");
+
+  const networkShot = await fireShotByPlayerId(
+    host.room.code,
+    host.sessionToken,
+    "12121212-1212-4212-8212-121212121212",
+    opponent.playerId,
+    now,
+    "m4a1",
+    "primary",
+  );
+  assert.equal(networkShot.accepted, false);
+  assert.equal(networkShot.reason, "Hedef bağlantısı yok");
+  const room = (await getRoom(host.room.code, host.sessionToken)).room;
+  assert.equal(room.players.find((player) => player.id === opponent.playerId).hp, 100);
+});
+
 test("deduplicates a network shot after the store is rehydrated", async () => {
   const { host, opponent } = await activeRoom();
   const shotId = "44444444-4444-4444-8444-444444444444";
@@ -172,6 +220,17 @@ test("state polling renews only its authenticated lease and stale leases expose 
   assert.equal(opponentAfter.connected, true);
   assert.equal(opponentAfter.markerId, opponentBefore.markerId);
   assert.equal(opponentAfter.lives, opponentBefore.lives);
+});
+
+test("reconnecting at the same clock value advances the public room revision", async () => {
+  const { host, opponent } = await activeRoom();
+  now += LEASE_TIMEOUT_MS + 1;
+  const stale = (await getRoom(host.room.code, opponent.sessionToken)).room;
+  assert.equal(stale.players.find((player) => player.id === host.playerId).connected, false);
+
+  const reconnected = await heartbeatRoom(host.room.code, host.sessionToken);
+  assert.equal(reconnected.room.players.find((player) => player.id === host.playerId).connected, true);
+  assert.ok(reconnected.room.updatedAt > stale.updatedAt);
 });
 
 test("keeps a disconnected player for the 90-second reconnect grace, then finishes deterministically", async () => {
@@ -345,7 +404,7 @@ test("public socket snapshots filter targeted effects per viewer without renewin
     opponent.playerId,
     now,
     "frag-grenade",
-    "primary",
+    "throw",
   );
   assert.equal(result.accepted, true);
   const hostView = await getPublicBattleSnapshot(host.room.code, host.sessionToken);
@@ -356,6 +415,47 @@ test("public socket snapshots filter targeted effects per viewer without renewin
   now += LEASE_TIMEOUT_MS + 1;
   const after = await getPublicBattleSnapshot(host.room.code, host.sessionToken);
   assert.equal(after.room.players.find((player) => player.id === host.playerId).connected, false);
+});
+
+test("accepts legacy primary grenade shots and rejects unsupported throw modes", async () => {
+  const { host, opponent } = await activeRoom();
+  const legacy = await fireShotByPlayerId(
+    host.room.code,
+    host.sessionToken,
+    "99999999-9999-4999-8999-999999999999",
+    opponent.playerId,
+    now,
+    "frag-grenade",
+    "primary",
+  );
+  assert.equal(legacy.accepted, true);
+
+  const invalid = await fireShotByPlayerId(
+    host.room.code,
+    host.sessionToken,
+    "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    opponent.playerId,
+    now,
+    "frag-grenade",
+    "burst",
+  );
+  assert.equal(invalid.accepted, false);
+  assert.equal(invalid.reason, "Geçersiz atış türü");
+});
+
+test("rejects throw mode for firearms", async () => {
+  const { host, opponent } = await activeRoom();
+  const result = await fireShotByPlayerId(
+    host.room.code,
+    host.sessionToken,
+    "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    opponent.playerId,
+    now,
+    "m4a1",
+    "throw",
+  );
+  assert.equal(result.accepted, false);
+  assert.equal(result.reason, "Bu silah fırlatılamaz");
 });
 
 test("rolls back a failed durable write without poisoning later operations", async () => {

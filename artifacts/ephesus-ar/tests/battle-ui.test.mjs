@@ -6,6 +6,7 @@ import {
   isBattleCombatDisabled,
   isGoneBattleSession,
   releaseBattleShot,
+  shouldApplyBattleSnapshot,
   tryAcquireBattleShot,
 } from '../lib/battle-ui.ts';
 import {
@@ -47,6 +48,14 @@ test('network targeting selects the active connected room opponent without camer
   assert.equal(selected.reason, null);
   assert.equal(getNetworkTarget(players.slice(0, 3), 'self').reason, 'NO_TARGET');
   assert.equal(getNetworkTarget([players[0], players[2]], 'self').reason, 'NO_OPPONENT');
+});
+
+test('authoritative room cache never regresses to an older combat snapshot', () => {
+  assert.equal(shouldApplyBattleSnapshot({ updatedAt: 12 }, { updatedAt: 13 }), true);
+  assert.equal(shouldApplyBattleSnapshot({ updatedAt: 13 }, { updatedAt: 13 }), true);
+  assert.equal(shouldApplyBattleSnapshot({ updatedAt: 14 }, { updatedAt: 13 }), false);
+  assert.equal(shouldApplyBattleSnapshot(undefined, { updatedAt: 1 }), true);
+  assert.equal(shouldApplyBattleSnapshot({ updatedAt: 1 }, {}), false);
 });
 
 test('finished and error HUD states never fall back to waiting', () => {

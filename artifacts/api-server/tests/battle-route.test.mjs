@@ -83,3 +83,43 @@ test("keeps a locked player reconnectable through the heartbeat route", async ()
   assert.equal(opponentAfter.markerId, opponentBefore.markerId);
   assert.equal(opponentAfter.lives, opponentBefore.lives);
 });
+
+test("accepts an idempotent player-targeted shot over authenticated HTTP", async () => {
+  const host = await createRoom("network-route-host", "network-route-host-request");
+  const opponent = await joinRoom(host.room.code, "network-route-opponent", "network-route-opponent-request");
+  const shotId = "network-route-shot-0001";
+  const payload = {
+    shotId,
+    targetPlayerId: opponent.playerId,
+    firedAt: now,
+    weaponId: "m4a1",
+    fireMode: "primary",
+  };
+  const send = () => fetch(`${baseUrl}/api/battle/rooms/${host.room.code}/network-shots`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${host.sessionToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const first = await send();
+  assert.equal(first.status, 200);
+  const firstResult = await first.json();
+  assert.equal(firstResult.accepted, true);
+  assert.equal(firstResult.targetId, opponent.playerId);
+  assert.equal(firstResult.damage, 18);
+
+  const duplicate = await send();
+  assert.equal(duplicate.status, 200);
+  const duplicateResult = await duplicate.json();
+  assert.equal(duplicateResult.accepted, true);
+
+  const state = await fetch(`${baseUrl}/api/battle/state?code=${host.room.code}`, {
+    headers: { Authorization: `Bearer ${opponent.sessionToken}` },
+  });
+  assert.equal(state.status, 200);
+  const statePayload = await state.json();
+  assert.equal(statePayload.room.players.find((player) => player.id === opponent.playerId).hp, 82);
+});

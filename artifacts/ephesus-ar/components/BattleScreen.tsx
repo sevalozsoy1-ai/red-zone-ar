@@ -23,6 +23,7 @@ import { VisionModeControl, VisionModeOverlay } from './VisionModeControl';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   getGetBattleStateQueryKey,
+  useFireNetworkBattleShot,
   useHeartbeatBattleRoom,
   useGetBattleState,
   useLeaveBattleRoom,
@@ -32,7 +33,7 @@ import type { VisionMode } from '@/lib/vision-modes';
 import PlayerMarker from './PlayerMarker';
 import { weaponActionLabel, weaponCategoryLabel, uiText } from '@/lib/i18n';
 import { rtlLayout } from '@/lib/rtl';
-import { battleHudStatus, getNetworkTarget, isBattleCombatDisabled, isGoneBattleSession } from '@/lib/battle-ui';
+import { battleHudStatus, getNetworkTarget, isBattleCombatDisabled, isGoneBattleSession, shouldApplyBattleSnapshot } from '@/lib/battle-ui';
 import { setBattleSessionToken } from '@/lib/battle-auth';
 import { economyText, formatUsdFromCents } from '@/lib/economy-ui';
 import {
@@ -46,6 +47,7 @@ import { ActivityIndicator, Alert, AppState, BackHandler, Linking, Modal, Platfo
 import { battleSessionCopy } from '@/lib/battle-session-copy';
 import { handleBattleAppStateChange, handleBattleHardwareBack } from '@/lib/battle-session-lifecycle';
 import { createShotId, useBattleSocket } from '@/lib/battle-socket';
+import { applyBattleWeaponSelection } from '@/lib/battle-weapon-selection';
 
 const HEAVY_COOLDOWN_MS: Partial<Record<WeaponId, number>> = {
   m249: 1100,
@@ -103,6 +105,7 @@ export default function BattleScreen({
   const authRequest = battleSession?.sessionToken
     ? { headers: { Authorization: `Bearer ${battleSession.sessionToken}` } }
     : undefined;
+  const networkShot = useFireNetworkBattleShot({ request: authRequest });
   const roomQuery = useGetBattleState(stateParams as Parameters<typeof useGetBattleState>[0], {
     request: authRequest,
     query: {
@@ -110,6 +113,14 @@ export default function BattleScreen({
       enabled: !!battleSession && appActive && !sessionExpired,
       refetchInterval: appActive && !sessionExpired ? 450 : false,
       refetchOnWindowFocus: true,
+      structuralSharing: (previous: unknown, incoming: unknown) => {
+        const previousSession = previous as BattleSession | undefined;
+        const incomingSession = incoming as BattleSession;
+        return previousSession && incomingSession?.room
+          && !shouldApplyBattleSnapshot(previousSession.room, incomingSession.room)
+          ? previousSession
+          : incomingSession;
+      },
     },
   });
   const room = roomQuery.data?.room ?? battleSession?.room;
@@ -403,12 +414,19 @@ export default function BattleScreen({
   useEffect(() => {
     const snapshot = networkSocket.lastRoomState;
     if (!snapshot?.room || !battleSession) return;
-    queryClient.setQueryData(roomQueryKey, (previous: unknown) => ({
-      ...(previous && typeof previous === 'object' ? previous : {}),
-      playerId: battleSession.playerId,
-      sessionToken: battleSession.sessionToken,
-      room: snapshot.room,
-    }));
+    queryClient.setQueryData(roomQueryKey, (previous: unknown) => {
+      const previousRecord = previous && typeof previous === 'object'
+        ? previous as { room?: { updatedAt?: unknown } }
+        : undefined;
+      const incomingRoom = snapshot.room as { updatedAt?: unknown };
+      if (!shouldApplyBattleSnapshot(previousRecord?.room, incomingRoom)) return previous;
+      return {
+        ...previousRecord,
+        playerId: battleSession.playerId,
+        sessionToken: battleSession.sessionToken,
+        room: snapshot.room,
+      };
+    });
   }, [battleSession, networkSocket.lastRoomState, queryClient, roomQueryKey]);
 
   useEffect(() => {
@@ -439,18 +457,21 @@ export default function BattleScreen({
   }, [battleSession, handleSessionExpired, roomQuery.error, sessionExpired]);
 
   const handleWeaponSelect = (id: WeaponId) => {
-      setPickerVisible(false);
-      if (id === selectedWeapon) {
-          return;
-      }
-      stopActions();
-      magazineInventoryRef.current = setMagazineAmmo(
-        magazineInventoryRef.current,
-        selectedWeapon,
-        getWeapon(selectedWeapon).capacity,
-        ammoRef.current,
-      );
-      setSelectedWeapon(id);
+      applyBattleWeaponSelection({
+        currentWeapon: selectedWeapon,
+        nextWeapon: id,
+        closePicker: () => setPickerVisible(false),
+        stopActions,
+        saveCurrentAmmo: () => {
+          magazineInventoryRef.current = setMagazineAmmo(
+            magazineInventoryRef.current,
+            selectedWeapon,
+            getWeapon(selectedWeapon).capacity,
+            ammoRef.current,
+          );
+        },
+        selectWeapon: setSelectedWeapon,
+      });
   };
 
   const openWeaponPicker = () => {
@@ -469,6 +490,10 @@ export default function BattleScreen({
     if (knifeThrowRunningRef.current || !isLiveRef.current || showAdRef.current || reloadingRef.current || !hasAmmo || now - lastFireTimeRef.current < cooldown) return false;
     const networkTargetState = getNetworkTarget(room?.players, ownPlayer?.id);
     const networkTarget = networkTargetState.target;
+    if (battleSession && !networkTarget) {
+      setShotMessage(networkTargetState.reason === 'NO_TARGET' ? 'Hedef aktif değil' : 'Rakip bağlantısı bekleniyor');
+      return false;
+    }
     lastFireTimeRef.current = now;
     // This is intentionally after all local fire guards. The camera component
     // treats the torch as an optional visual aid and safely ignores unsupported
@@ -489,22 +514,55 @@ export default function BattleScreen({
     }
     recoilAnim.setValue(w.recoil * 3);
     Animated.spring(recoilAnim, { toValue: 0, friction: 6, tension: 120, useNativeDriver: true }).start();
-    if (battleSession && networkTarget && networkSocket.connected) {
+    if (battleSession && networkTarget) {
       const shotId = createShotId();
-      networkPendingRef.current.set(shotId, { weaponId: w.id });
-      const sent = networkSocket.sendShotIntent({
+      const intent = {
         shotId,
         targetPlayerId: networkTarget.id,
         weaponId: w.id,
         fireMode,
         clientFiredAt: now,
-      });
-      if (!sent) {
-        networkPendingRef.current.delete(shotId);
-        setShotMessage('Ağ bağlantısı yok');
-      } else {
-        setShotMessage('Vuruş gönderiliyor');
+      } as const;
+      const sentViaSocket = networkSocket.connected
+        ? networkSocket.sendShotIntent(intent)
+        : false;
+      if (sentViaSocket) {
+        networkPendingRef.current.set(shotId, { weaponId: w.id });
       }
+      void networkShot.mutateAsync(
+        {
+          code: battleSession.room.code,
+          data: {
+            shotId,
+            targetPlayerId: networkTarget.id,
+            firedAt: now,
+            weaponId: w.id,
+            fireMode,
+          },
+        },
+      ).then((result) => {
+        queryClient.setQueryData(roomQueryKey, (previous: unknown) => {
+          const previousRecord = previous && typeof previous === 'object'
+            ? previous as { room?: { updatedAt?: unknown } }
+            : undefined;
+          if (!shouldApplyBattleSnapshot(previousRecord?.room, result.room)) return previous;
+          return {
+            ...previousRecord,
+            playerId: battleSession.playerId,
+            sessionToken: battleSession.sessionToken,
+            room: result.room,
+          };
+        });
+        if (result.accepted) {
+          setShotMessage('Vuruş onaylandı');
+          if (!sentViaSocket) showFlash('hit');
+        } else {
+          setShotMessage(result.reason || 'Vuruş reddedildi');
+        }
+      }).catch(() => {
+        if (!sentViaSocket) setShotMessage('Vuruş sunucuya ulaşmadı');
+      });
+      setShotMessage(sentViaSocket ? 'Vuruş gönderiliyor' : 'Vuruş HTTP üzerinden gönderiliyor');
     }
     return true;
   };

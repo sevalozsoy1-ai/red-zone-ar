@@ -84,6 +84,18 @@ export type BattleTargetCandidate = {
   markerId?: number;
 };
 
+export function shouldApplyBattleSnapshot(
+  current: { updatedAt?: unknown } | null | undefined,
+  incoming: { updatedAt?: unknown } | null | undefined,
+): boolean {
+  const incomingRevision = incoming?.updatedAt;
+  if (typeof incomingRevision !== 'number' || !Number.isFinite(incomingRevision)) return false;
+  const currentRevision = current?.updatedAt;
+  return typeof currentRevision !== 'number'
+    || !Number.isFinite(currentRevision)
+    || incomingRevision >= currentRevision;
+}
+
 /**
  * Keep the client-side network target rules in one place.  In particular, a
  * player retained for reconnect grace is not a shootable target.
