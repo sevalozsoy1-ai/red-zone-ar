@@ -363,7 +363,15 @@ export default function BattleLobbyScreen({
   const authRequest = session?.sessionToken
     ? { headers: { Authorization: `Bearer ${session.sessionToken}` } }
     : undefined;
-  const healthQuery = useHealthCheck({ query: { queryKey: getHealthCheckQueryKey(), retry: 1, staleTime: 30_000 } });
+  const healthQuery = useHealthCheck({
+    query: {
+      queryKey: getHealthCheckQueryKey(),
+      retry: 5,
+      retryDelay: (attemptIndex) => Math.min(1_000 * 2 ** attemptIndex, 8_000),
+      staleTime: 30_000,
+      refetchOnReconnect: true,
+    },
+  });
   const roomQuery = useGetBattleState(stateParams as Parameters<typeof useGetBattleState>[0], {
     request: authRequest,
     query: {

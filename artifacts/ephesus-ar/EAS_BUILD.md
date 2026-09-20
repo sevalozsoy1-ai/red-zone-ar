@@ -19,13 +19,12 @@ alanına ekler. Bu kimlik elle uydurulmamalıdır.
 
 ## Önizleme APK'sı
 
-`preview` derlemesi `EXPO_PUBLIC_APP_ENV=test` kullanır ve güvenilir, dışarıdan
-erişilebilen HTTPS API adresini Expo EAS `preview` ortamında
-`EXPO_PUBLIC_API_URL` olarak bekler. Bu değer uygulama paketine gömülür; gizli
-değer değildir. Replit preview adresi yerine kalıcı bir HTTPS API/deployment
-adresi kullanın.
+`preview` derlemesi `EXPO_PUBLIC_APP_ENV=test` kullanır ve kalıcı
+`https://ar-savas-oyunu.replit.app` API adresini `EXPO_PUBLIC_API_URL` olarak
+pakete gömer. Bu değer gizli değildir. Geçici `.replit.dev` adresleri cihaz
+build'lerinde kullanılmaz.
 
-Expo dashboard'da `preview` ortamına `EXPO_PUBLIC_API_URL` ekledikten sonra:
+API deployment'ının `/api/healthz` isteğine `200 OK` verdiğini doğruladıktan sonra:
 
 ```bash
 pnpm run eas:build:android:preview
@@ -37,17 +36,16 @@ yüklenmemelidir.
 
 ## Production AAB'si
 
-`production` profili gerçek HTTPS production API adresini, EAS'te korunan
-Android imzalama yapılandırmasını ve otomatik sürüm artırmayı kullanır:
+`production` profili aynı kalıcı HTTPS API adresini, EAS'te korunan Android
+imzalama yapılandırmasını ve otomatik sürüm artırmayı kullanır:
 
 ```bash
 pnpm run validate:release
 pnpm run eas:build:android:production
 ```
 
-Production API adresini Expo EAS `production` ortamında
-`EXPO_PUBLIC_API_URL` olarak tanımlamadan bu profili çalıştırmayın. Gerçek
-imzalı AAB üretildikten sonra `pnpm verify:android <artifact>.aab --release`
+Gerçek imzalı AAB üretildikten sonra
+`pnpm verify:android <artifact>.aab --release`
 ile onaylı sertifika parmak izi ve 16 KB native kütüphane hizalamasını kontrol
 edin.
 

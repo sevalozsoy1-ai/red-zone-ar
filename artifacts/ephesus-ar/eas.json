@@ -16,6 +16,7 @@
       },
       "env": {
         "EXPO_PUBLIC_APP_ENV": "test",
+        "EXPO_PUBLIC_API_URL": "https://ar-savas-oyunu.replit.app",
         "ANDROID_QA_TEST_SIGNING": "true"
       }
     },
@@ -27,7 +28,8 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "EXPO_PUBLIC_APP_ENV": "production"
+        "EXPO_PUBLIC_APP_ENV": "production",
+        "EXPO_PUBLIC_API_URL": "https://ar-savas-oyunu.replit.app"
       }
     }
   }
