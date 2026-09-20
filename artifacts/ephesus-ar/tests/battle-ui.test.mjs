@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   battleHudStatus,
+  getMarkerTarget,
   getNetworkTarget,
   isBattleCombatDisabled,
   isGoneBattleSession,
@@ -29,6 +30,19 @@ test('finished and unavailable rooms disable every combat control', () => {
   assert.equal(isBattleCombatDisabled({ ...activeCombat, roomError: true }), true);
   assert.equal(isBattleCombatDisabled({ ...activeCombat, cameraLive: false }), true);
   assert.equal(isBattleCombatDisabled(activeCombat), false);
+});
+
+test('camera marker target stays valid while presence heartbeat catches up', () => {
+  const players = [
+    { id: 'self', alive: true, connected: true, markerId: 1 },
+    { id: 'target', alive: true, connected: false, markerId: 4 },
+    { id: 'dead', alive: false, connected: true, markerId: 5 },
+  ];
+
+  assert.equal(getMarkerTarget(players, 'self', 4)?.id, 'target');
+  assert.equal(getMarkerTarget(players, 'self', 1), null);
+  assert.equal(getMarkerTarget(players, 'self', 5), null);
+  assert.equal(getMarkerTarget(players, 'self', null), null);
 });
 
 test('knife throw draw lock blocks controls while the active battle is otherwise ready', () => {
