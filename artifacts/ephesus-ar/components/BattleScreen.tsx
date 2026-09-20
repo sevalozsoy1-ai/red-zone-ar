@@ -33,8 +33,9 @@ import type { VisionMode } from '@/lib/vision-modes';
 import PlayerMarker from './PlayerMarker';
 import { weaponActionLabel, weaponCategoryLabel, uiText } from '@/lib/i18n';
 import { rtlLayout } from '@/lib/rtl';
-import { battleHudStatus, getNetworkTarget, isBattleCombatDisabled, isGoneBattleSession, shouldApplyBattleSnapshot } from '@/lib/battle-ui';
+import { battleHudStatus, getMarkerTarget, isBattleCombatDisabled, isGoneBattleSession, shouldApplyBattleSnapshot } from '@/lib/battle-ui';
 import { setBattleSessionToken } from '@/lib/battle-auth';
+import { createMarkerLockState, detectPlayerMarker, updateMarkerAuthorization } from '@/lib/marker-detection';
 import { economyText, formatUsdFromCents } from '@/lib/economy-ui';
 import {
   createMatchMagazineInventory,
@@ -81,7 +82,7 @@ export default function BattleScreen({
   const colors = useColors();
   const { locale, t, rtl } = useI18n();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const [status, setStatus] = useState<CameraStatus>({ state: 'requesting', message: t('cameraHint') });
   const [restartKey, setRestartKey] = useState(0);
   const [fireSignal, setFireSignal] = useState(0);
@@ -106,6 +107,9 @@ export default function BattleScreen({
     ? { headers: { Authorization: `Bearer ${battleSession.sessionToken}` } }
     : undefined;
   const networkShot = useFireNetworkBattleShot({ request: authRequest });
+  const heartbeat = useHeartbeatBattleRoom({ request: authRequest });
+  const heartbeatRef = useRef(heartbeat);
+  heartbeatRef.current = heartbeat;
   const roomQuery = useGetBattleState(stateParams as Parameters<typeof useGetBattleState>[0], {
     request: authRequest,
     query: {
@@ -125,6 +129,14 @@ export default function BattleScreen({
   });
   const room = roomQuery.data?.room ?? battleSession?.room;
   const ownPlayer = room?.players.find((player) => player.id === battleSession?.playerId);
+  const [detectedMarkerId, setDetectedMarkerId] = useState<number | null>(null);
+  const detectedMarkerRef = useRef<number | null>(null);
+  const markerAuthorizationRef = useRef(createMarkerLockState());
+  const clearDetectedTarget = useCallback(() => {
+    markerAuthorizationRef.current = createMarkerLockState();
+    detectedMarkerRef.current = null;
+    setDetectedMarkerId(null);
+  }, []);
   const networkSocket = useBattleSocket(
     battleSession ? { roomCode: battleSession.room.code, sessionToken: battleSession.sessionToken } : null,
     !!battleSession && appActive && !sessionExpired,
@@ -132,17 +144,20 @@ export default function BattleScreen({
   const combatReady = !isBattleCombatDisabled({
     hasBattleSession: !!battleSession && !sessionExpired,
     roomStatus: room?.status,
-    roomError: roomQuery.isError || sessionExpired || !appActive,
+    // A transient room request failure must never disable the physical trigger.
+    // The server still decides whether a camera-confirmed hit is authoritative.
+    roomError: sessionExpired || !appActive,
     cameraLive: live && appActive,
     ownPlayerAlive: !!ownPlayer?.alive,
     adOpen: false,
     reloading: false,
   });
-  const aimedNetworkTarget = getNetworkTarget(
+  const aimedMarkerTarget = getMarkerTarget(
     room?.players,
     ownPlayer?.id,
-  ).target;
-  const hasValidAimedTarget = networkSocket.connected && combatReady && aimedNetworkTarget !== null;
+    detectedMarkerId,
+  );
+  const hasValidAimedTarget = combatReady && aimedMarkerTarget !== null;
   const [combatFlash, setCombatFlash] = useState<'hit' | 'hurt' | null>(null);
   const [shotMessage, setShotMessage] = useState('');
   const [clock, setClock] = useState(Date.now());
@@ -171,7 +186,7 @@ export default function BattleScreen({
   const combatControlsDisabled = isBattleCombatDisabled({
     hasBattleSession: !!battleSession && !sessionExpired,
     roomStatus: room?.status,
-    roomError: roomQuery.isError || sessionExpired || !appActive,
+    roomError: sessionExpired || !appActive,
     cameraLive: live && appActive,
     ownPlayerAlive: !!ownPlayer?.alive,
     adOpen: showAd,
@@ -216,6 +231,7 @@ export default function BattleScreen({
     if (nextIdentity !== sessionIdentityRef.current) {
       networkPendingRef.current.clear();
       seenNetworkHitIdsRef.current.clear();
+      clearDetectedTarget();
       suppressNextHealthFlashRef.current = false;
       if (suppressHealthFlashTimeoutRef.current) clearTimeout(suppressHealthFlashTimeoutRef.current);
       suppressHealthFlashTimeoutRef.current = null;
@@ -227,7 +243,11 @@ export default function BattleScreen({
       setSessionExpired(false);
     }
     sessionTokenRef.current = battleSession?.sessionToken;
-  }, [battleSession?.playerId, battleSession?.room.code, battleSession?.sessionToken]);
+  }, [battleSession?.playerId, battleSession?.room.code, battleSession?.sessionToken, clearDetectedTarget]);
+
+  useEffect(() => {
+    clearDetectedTarget();
+  }, [appActive, cameraFacing, clearDetectedTarget, live, restartKey]);
 
   const handleSessionExpired = useCallback(() => {
     if (sessionExpiredRef.current) return;
@@ -247,6 +267,35 @@ export default function BattleScreen({
       onPress: onExit,
     }], { cancelable: false });
   }, [battleSession, locale, onExit, onSessionExpired, queryClient, t]);
+
+  useEffect(() => {
+    if (!battleSession || sessionExpired) return;
+    const beat = () => {
+      if (AppState.currentState !== 'active' || heartbeatRef.current.isPending) return;
+      heartbeatRef.current.mutate(
+        { code: battleSession.room.code },
+        {
+          onError: (requestError) => {
+            if (isGoneBattleSession(requestError)) handleSessionExpired();
+          },
+        },
+      );
+    };
+    beat();
+    const interval = setInterval(beat, 5_000);
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') beat();
+    });
+    return () => {
+      clearInterval(interval);
+      subscription.remove();
+    };
+  }, [
+    battleSession?.room.code,
+    battleSession?.sessionToken,
+    handleSessionExpired,
+    sessionExpired,
+  ]);
 
   const magazineInventoryRef = useRef(
     createMatchMagazineInventory(selectedWeapon, getWeapon(selectedWeapon).capacity),
@@ -488,12 +537,11 @@ export default function BattleScreen({
     const hasKnifeInventory = activeGoldRef.current || w.id !== 'knife' || ammoRef.current > 0;
     const hasAmmo = activeGoldRef.current || (w.id === 'knife' ? hasKnifeInventory : ammoRef.current > 0);
     if (knifeThrowRunningRef.current || !isLiveRef.current || showAdRef.current || reloadingRef.current || !hasAmmo || now - lastFireTimeRef.current < cooldown) return false;
-    const networkTargetState = getNetworkTarget(room?.players, ownPlayer?.id);
-    const networkTarget = networkTargetState.target;
-    if (battleSession && !networkTarget) {
-      setShotMessage(networkTargetState.reason === 'NO_TARGET' ? 'Hedef aktif değil' : 'Rakip bağlantısı bekleniyor');
-      return false;
-    }
+    const networkTarget = getMarkerTarget(
+      room?.players,
+      ownPlayer?.id,
+      detectedMarkerRef.current,
+    );
     lastFireTimeRef.current = now;
     // This is intentionally after all local fire guards. The camera component
     // treats the torch as an optional visual aid and safely ignores unsupported
@@ -563,6 +611,10 @@ export default function BattleScreen({
         if (!sentViaSocket) setShotMessage('Vuruş sunucuya ulaşmadı');
       });
       setShotMessage(sentViaSocket ? 'Vuruş gönderiliyor' : 'Vuruş HTTP üzerinden gönderiliyor');
+    } else if (battleSession) {
+      // Firing is intentionally local-first. No camera-confirmed target means
+      // a visible/audible miss, not a dead trigger.
+      setShotMessage('Atış yapıldı · hedef yok');
     }
     return true;
   };
@@ -783,6 +835,30 @@ export default function BattleScreen({
             restartKey={restartKey}
             fireSignal={fireSignal}
             facing={cameraFacing}
+            onFrame={(frame) => {
+              if (!room || !ownPlayer) {
+                clearDetectedTarget();
+                return;
+              }
+              const observedMarkerId = detectPlayerMarker(
+                frame,
+                room.players.filter((player) =>
+                  player.id !== ownPlayer.id
+                  && player.alive,
+                ),
+                { x: 0, y: 0 },
+                { width, height },
+              );
+              const authorizedMarkerId = updateMarkerAuthorization(
+                markerAuthorizationRef.current,
+                observedMarkerId,
+                Date.now(),
+              );
+              detectedMarkerRef.current = authorizedMarkerId;
+              setDetectedMarkerId((current) =>
+                current === authorizedMarkerId ? current : authorizedMarkerId
+              );
+            }}
             onFacingUnavailable={(failedFacing) => {
               if (failedFacing === 'back') {
                 stopActions();
