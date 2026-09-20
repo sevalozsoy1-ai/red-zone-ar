@@ -12,6 +12,4 @@ export const FIRE_EFFECT_RANGES = {
   slingshotBallY: fireAnimOutwardRange(8, -230),
   slingshotStreakScaleY: fireAnimOutwardRange(0.2, 1),
   launchSmokeY: fireAnimOutwardRange(12, -44),
-  grenadeThrowY: fireAnimOutwardRange(0, -260),
-  grenadeScale: fireAnimOutwardRange(1, 0.55),
 };

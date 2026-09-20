@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   battleHudStatus,
+  getNetworkTarget,
   isBattleCombatDisabled,
   isGoneBattleSession,
   releaseBattleShot,
@@ -34,11 +35,26 @@ test('knife throw draw lock blocks controls while the active battle is otherwise
   assert.equal(isBattleCombatDisabled({ ...activeCombat, actionLocked: false }), false);
 });
 
+test('network targeting selects the active connected room opponent without camera filtering', () => {
+  const players = [
+    { id: 'self', alive: true, connected: true, markerId: 0 },
+    { id: 'dead', alive: false, connected: true, markerId: 1 },
+    { id: 'away', alive: true, connected: false, markerId: 2 },
+    { id: 'live', alive: true, connected: true, markerId: 3 },
+  ];
+  const selected = getNetworkTarget(players, 'self');
+  assert.equal(selected.target?.id, 'live');
+  assert.equal(selected.reason, null);
+  assert.equal(getNetworkTarget(players.slice(0, 3), 'self').reason, 'NO_TARGET');
+  assert.equal(getNetworkTarget([players[0], players[2]], 'self').reason, 'NO_OPPONENT');
+});
+
 test('finished and error HUD states never fall back to waiting', () => {
-  assert.equal(battleHudStatus({ hasBattleSession: true, roomStatus: 'finished', roomError: false, detectedMarkerId: null }), 'finished');
-  assert.equal(battleHudStatus({ hasBattleSession: true, roomStatus: 'active', roomError: true, detectedMarkerId: null }), 'error');
-  assert.equal(battleHudStatus({ hasBattleSession: true, roomStatus: 'active', roomError: false, detectedMarkerId: null }), 'waiting');
-  assert.equal(battleHudStatus({ hasBattleSession: true, roomStatus: 'active', roomError: false, cameraLive: false, detectedMarkerId: null }), 'camera');
+  assert.equal(battleHudStatus({ hasBattleSession: true, roomStatus: 'finished', roomError: false, hasActiveOpponent: false }), 'finished');
+  assert.equal(battleHudStatus({ hasBattleSession: true, roomStatus: 'active', roomError: true, hasActiveOpponent: false }), 'error');
+  assert.equal(battleHudStatus({ hasBattleSession: true, roomStatus: 'active', roomError: false, hasActiveOpponent: false }), 'waiting');
+  assert.equal(battleHudStatus({ hasBattleSession: true, roomStatus: 'active', roomError: false, cameraLive: false, hasActiveOpponent: true }), 'camera');
+  assert.equal(battleHudStatus({ hasBattleSession: true, roomStatus: 'active', roomError: false, hasActiveOpponent: true }), 'ready');
 });
 
 test('missing leave sessions may safely exit while transport errors remain visible', () => {

@@ -191,6 +191,78 @@ const ActionEffect = ({ action, fireAnim, weaponId }: { action: WeaponAction; fi
   }
 };
 
+const GrenadeImpact = ({ fireAnim, weaponId }: { fireAnim: Animated.Value; weaponId: WeaponId }) => {
+  if (weaponId === 'frag-grenade') {
+    const blastScale = fireAnim.interpolate({ inputRange: [0, 0.05, 0.15], outputRange: [1.8, 1.5, 0.2] });
+    const blastOpacity = fireAnim.interpolate({ inputRange: [0, 0.05, 0.1, 0.15], outputRange: [0, 0.8, 1, 0] });
+    const shardScale = fireAnim.interpolate({ inputRange: [0, 0.15], outputRange: [2, 0.1] });
+    return (
+      <View style={styles.impactContainer}>
+        <Animated.View style={[styles.fragBlast, { opacity: blastOpacity, transform: [{ scale: blastScale }] }]} />
+        <Animated.View style={[styles.fragCore, { opacity: blastOpacity, transform: [{ scale: blastScale }] }]} />
+        <Animated.View style={[styles.fragShard, { opacity: blastOpacity, transform: [{ scale: shardScale }, { translateX: -40 }, { translateY: -50 }, { rotate: '-40deg' }] }]} />
+        <Animated.View style={[styles.fragShard, { opacity: blastOpacity, transform: [{ scale: shardScale }, { translateX: 40 }, { translateY: -40 }, { rotate: '40deg' }] }]} />
+        <Animated.View style={[styles.fragShard, { opacity: blastOpacity, transform: [{ scale: shardScale }, { translateX: -40 }, { translateY: 50 }, { rotate: '-140deg' }] }]} />
+        <Animated.View style={[styles.fragShard, { opacity: blastOpacity, transform: [{ scale: shardScale }, { translateX: 40 }, { translateY: 50 }, { rotate: '140deg' }] }]} />
+      </View>
+    );
+  }
+
+  if (weaponId === 'flashbang') {
+    const flashScale = fireAnim.interpolate({ inputRange: [0, 0.1, 0.15], outputRange: [4, 1.5, 0.1] });
+    const flashOpacity = fireAnim.interpolate({ inputRange: [0, 0.05, 0.15], outputRange: [0, 1, 0] });
+    return (
+      <View style={styles.impactContainer}>
+        <Animated.View style={[styles.flashbangCore, { opacity: flashOpacity, transform: [{ scale: flashScale }] }]} />
+        <Animated.View style={[styles.flashbangGlare, { opacity: flashOpacity, transform: [{ scale: flashScale }, { rotate: '45deg' }] }]} />
+        <Animated.View style={[styles.flashbangGlare, { opacity: flashOpacity, transform: [{ scale: flashScale }, { rotate: '-45deg' }] }]} />
+      </View>
+    );
+  }
+
+  if (weaponId === 'smoke-grenade') {
+    const smokeScale = fireAnim.interpolate({ inputRange: [0, 0.1, 0.15], outputRange: [3.5, 1, 0.1] });
+    const smokeOpacity = fireAnim.interpolate({ inputRange: [0, 0.02, 0.1, 0.15], outputRange: [0, 0.8, 1, 0] });
+    return (
+      <View style={styles.impactContainer}>
+        <Animated.View style={[styles.smokeCloud, { width: 140, height: 140, left: -70, top: -70, opacity: smokeOpacity, transform: [{ scale: smokeScale }, { translateX: -30 }, { translateY: -10 }] }]} />
+        <Animated.View style={[styles.smokeCloud, { width: 120, height: 120, left: -60, top: -60, backgroundColor: 'rgba(130, 145, 155, 0.9)', opacity: smokeOpacity, transform: [{ scale: smokeScale }, { translateX: 30 }, { translateY: -25 }] }]} />
+        <Animated.View style={[styles.smokeCloud, { width: 160, height: 160, left: -80, top: -80, opacity: smokeOpacity, transform: [{ scale: smokeScale }, { translateY: 20 }] }]} />
+      </View>
+    );
+  }
+
+  return null;
+};
+
+const GrenadeEffect = ({ fireAnim, weaponId }: { fireAnim: Animated.Value; weaponId: WeaponId }) => {
+  const projY = fireAnim.interpolate({ inputRange: [0, 0.15, 1], outputRange: [-250, -250, 100] });
+  const projScale = fireAnim.interpolate({ inputRange: [0, 0.15, 1], outputRange: [0.15, 0.15, 0.8] });
+  const projRotate = fireAnim.interpolate({ inputRange: [0, 1], outputRange: ['720deg', '0deg'] });
+  const projOpacity = fireAnim.interpolate({ inputRange: [0, 0.05, 0.15, 0.95, 1], outputRange: [0, 0, 1, 1, 0] });
+
+  return (
+    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+      <Animated.View
+        style={[
+          styles.grenadeProjectile,
+          {
+            opacity: projOpacity,
+            transform: [
+              { translateY: projY },
+              { scale: projScale },
+              { rotate: projRotate },
+            ],
+          },
+        ]}
+      >
+        <Image source={WEAPON_IMAGES[weaponId]} resizeMode="contain" style={styles.image} />
+      </Animated.View>
+      <GrenadeImpact fireAnim={fireAnim} weaponId={weaponId} />
+    </View>
+  );
+};
+
 const KnifeThrowProjectile = ({
   animation,
   target,
@@ -274,7 +346,6 @@ export default function WeaponView({ weaponId, archetype, aimAnim, fireAnim, rec
   useEffect(() => {
     equipAnim.stopAnimation();
     equipAnim.setValue(0);
-    if (isGrenade) return;
     const animation = Animated.sequence([
       Animated.delay(280),
       Animated.timing(equipAnim, {
@@ -286,7 +357,7 @@ export default function WeaponView({ weaponId, archetype, aimAnim, fireAnim, rec
     ]);
     animation.start();
     return () => animation.stop();
-  }, [equipAnim, isGrenade, weaponId]);
+  }, [equipAnim, weaponId]);
 
   const translateX = aimAnim.x.interpolate({
     inputRange: [-width / 2, width / 2],
@@ -299,9 +370,8 @@ export default function WeaponView({ weaponId, archetype, aimAnim, fireAnim, rec
     extrapolate: 'clamp',
   });
   const reloadY = reloadAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, 190, 0] });
-  const throwY = fireAnim.interpolate({ inputRange: [0, 1], outputRange: FIRE_EFFECT_RANGES.grenadeThrowY });
   const actionY = isGrenade
-    ? Animated.add(aimY, throwY)
+    ? aimY
     : Animated.add(Animated.add(aimY, recoilAnim), reloadY);
   const totalY = Animated.add(actionY, isAiming && !isGrenade ? -62 : 0);
   const knifeDrawY = knifeThrowAnim.interpolate({
@@ -321,12 +391,12 @@ export default function WeaponView({ weaponId, archetype, aimAnim, fireAnim, rec
     <View pointerEvents="none" style={StyleSheet.absoluteFill}>
       <Animated.View
         testID="weapon-view"
-        style={[styles.container, isGrenade && styles.grenadeContainer, {
+        style={[styles.container, {
           transform: [
             { translateX },
             { translateY: totalY },
             { rotate: action === 'melee' ? meleeRotate : rotate },
-            { scale: isGrenade ? fireAnim.interpolate({ inputRange: [0, 1], outputRange: FIRE_EFFECT_RANGES.grenadeScale }) : isAiming ? 1.52 : 1 },
+            { scale: isAiming && !isGrenade ? 1.52 : 1 },
           ],
         }]}
       >
@@ -335,7 +405,7 @@ export default function WeaponView({ weaponId, archetype, aimAnim, fireAnim, rec
           <Animated.View
             style={[
               styles.equipLayer,
-              !isGrenade && {
+              {
                 transform: [
                   { perspective: 900 },
                   { translateY: equipY },
@@ -345,8 +415,22 @@ export default function WeaponView({ weaponId, archetype, aimAnim, fireAnim, rec
               },
             ]}
           >
-            {!isGrenade && <ActionEffect action={action} fireAnim={fireAnim} weaponId={weaponId} />}
-            <Image source={isGrenade ? WEAPON_IMAGES[weaponId] : WEAPON_FPS_IMAGES[weaponId] ?? WEAPON_IMAGES[weaponId]} resizeMode="contain" style={styles.image} />
+            {isGrenade ? (
+              <>
+                <GrenadeEffect fireAnim={fireAnim} weaponId={weaponId} />
+                <Animated.View style={[styles.heldGrenadeContainer, {
+                  opacity: fireAnim.interpolate({ inputRange: [0, 0.1, 0.2, 1], outputRange: [1, 1, 0, 0] }),
+                  transform: [{ translateY: fireAnim.interpolate({ inputRange: [0, 0.2, 1], outputRange: [0, 80, 80] }) }]
+                }]}>
+                  <Image source={WEAPON_IMAGES[weaponId]} resizeMode="contain" style={styles.heldGrenadeImage} />
+                </Animated.View>
+              </>
+            ) : (
+              <>
+                <ActionEffect action={action} fireAnim={fireAnim} weaponId={weaponId} />
+                <Image source={WEAPON_FPS_IMAGES[weaponId] ?? WEAPON_IMAGES[weaponId]} resizeMode="contain" style={styles.image} />
+              </>
+            )}
           </Animated.View>
         </Animated.View>
       </Animated.View>
@@ -387,10 +471,82 @@ const styles = StyleSheet.create({
     shadowRadius: 9,
     elevation: 5,
   },
-  grenadeContainer: {
-    width: 210,
-    height: 210,
-    bottom: 10,
+  heldGrenadeContainer: {
+    position: 'absolute',
+    left: 430 / 2 - 50,
+    top: 150,
+    width: 100,
+    height: 100,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heldGrenadeImage: {
+    width: '100%',
+    height: '100%',
+  },
+  grenadeProjectile: {
+    position: 'absolute',
+    left: 430 / 2 - 30,
+    top: 270 / 2 - 30,
+    width: 60,
+    height: 60,
+    zIndex: 2,
+  },
+  impactContainer: {
+    position: 'absolute',
+    left: 430 / 2,
+    top: 135 - 250,
+    zIndex: 1,
+  },
+  fragBlast: {
+    position: 'absolute',
+    width: 160,
+    height: 160,
+    left: -80,
+    top: -80,
+    borderRadius: 80,
+    backgroundColor: '#ff7700',
+  },
+  fragCore: {
+    position: 'absolute',
+    width: 100,
+    height: 100,
+    left: -50,
+    top: -50,
+    borderRadius: 50,
+    backgroundColor: '#ffcc00',
+  },
+  fragShard: {
+    position: 'absolute',
+    width: 6,
+    height: 24,
+    backgroundColor: '#ffffff',
+    borderRadius: 3,
+    left: -3,
+    top: -12,
+  },
+  flashbangCore: {
+    position: 'absolute',
+    width: 120,
+    height: 120,
+    left: -60,
+    top: -60,
+    borderRadius: 60,
+    backgroundColor: '#ffffff',
+  },
+  flashbangGlare: {
+    position: 'absolute',
+    width: 400,
+    height: 12,
+    left: -200,
+    top: -6,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderRadius: 6,
+  },
+  smokeCloud: {
+    position: 'absolute',
+    borderRadius: 999,
+    backgroundColor: 'rgba(160, 175, 185, 0.95)',
   },
   image: {
     width: '100%',

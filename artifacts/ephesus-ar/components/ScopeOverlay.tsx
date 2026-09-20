@@ -261,7 +261,7 @@ const styles = StyleSheet.create({
   },
   sightCenterDot: {
     position: 'absolute',
-    top: 89,
+    top: 104,
     width: 4,
     height: 4,
     borderRadius: 2,

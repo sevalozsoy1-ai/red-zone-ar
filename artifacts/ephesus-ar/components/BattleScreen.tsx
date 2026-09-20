@@ -17,7 +17,6 @@ import {
 } from '@/lib/weapons';
 import WeaponView from './WeaponView';
 import WeaponCatalogList from './WeaponCatalogList';
-import AimTouchLayer, { AimTouchLayerRef } from './AimTouchLayer';
 import FireButton from './FireButton';
 import { IronSightOverlay, NormalReticle, ScopeOverlay } from './ScopeOverlay';
 import { VisionModeControl, VisionModeOverlay } from './VisionModeControl';
@@ -25,19 +24,15 @@ import { useQueryClient } from '@tanstack/react-query';
 import {
   getGetBattleStateQueryKey,
   useHeartbeatBattleRoom,
-  useFireBattleShot,
   useGetBattleState,
   useLeaveBattleRoom,
   type BattleSession,
 } from '@workspace/api-client-react';
-import { createMarkerLockState, detectPlayerMarker, updateMarkerLock } from '@/lib/marker-detection';
-import type { MarkerLockState } from '@/lib/marker-detection';
 import type { VisionMode } from '@/lib/vision-modes';
 import PlayerMarker from './PlayerMarker';
-import { clampAimOffset } from '@/lib/aim';
 import { weaponActionLabel, weaponCategoryLabel, uiText } from '@/lib/i18n';
 import { rtlLayout } from '@/lib/rtl';
-import { battleHudStatus, isBattleCombatDisabled, isGoneBattleSession, releaseBattleShot, tryAcquireBattleShot } from '@/lib/battle-ui';
+import { battleHudStatus, getNetworkTarget, isBattleCombatDisabled, isGoneBattleSession } from '@/lib/battle-ui';
 import { setBattleSessionToken } from '@/lib/battle-auth';
 import { economyText, formatUsdFromCents } from '@/lib/economy-ui';
 import {
@@ -84,7 +79,7 @@ export default function BattleScreen({
   const colors = useColors();
   const { locale, t, rtl } = useI18n();
   const insets = useSafeAreaInsets();
-  const { width, height } = useWindowDimensions();
+  const { width } = useWindowDimensions();
   const [status, setStatus] = useState<CameraStatus>({ state: 'requesting', message: t('cameraHint') });
   const [restartKey, setRestartKey] = useState(0);
   const [fireSignal, setFireSignal] = useState(0);
@@ -119,8 +114,6 @@ export default function BattleScreen({
   });
   const room = roomQuery.data?.room ?? battleSession?.room;
   const ownPlayer = room?.players.find((player) => player.id === battleSession?.playerId);
-  const [networkHitTest, setNetworkHitTest] = useState(false);
-  const [networkTargetId, setNetworkTargetId] = useState<string | null>(null);
   const networkSocket = useBattleSocket(
     battleSession ? { roomCode: battleSession.room.code, sessionToken: battleSession.sessionToken } : null,
     !!battleSession && appActive && !sessionExpired,
@@ -134,8 +127,11 @@ export default function BattleScreen({
     adOpen: false,
     reloading: false,
   });
-  const [detectedMarkerId, setDetectedMarkerId] = useState<number | null>(null);
-  const [reticleHit, setReticleHit] = useState(false);
+  const aimedNetworkTarget = getNetworkTarget(
+    room?.players,
+    ownPlayer?.id,
+  ).target;
+  const hasValidAimedTarget = networkSocket.connected && combatReady && aimedNetworkTarget !== null;
   const [combatFlash, setCombatFlash] = useState<'hit' | 'hurt' | null>(null);
   const [shotMessage, setShotMessage] = useState('');
   const [clock, setClock] = useState(Date.now());
@@ -146,7 +142,6 @@ export default function BattleScreen({
   // acknowledgements in flight at once. The server remains authoritative for
   // cadence and idempotency; these maps only reconcile local ammo/UI state.
   const networkPendingRef = useRef(new Map<string, { weaponId: WeaponId }>());
-  const networkAmmoPendingRef = useRef(new Set<string>());
   const seenNetworkHitIdsRef = useRef(new Set<string>());
   const flashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
@@ -160,7 +155,6 @@ export default function BattleScreen({
   const [isScopeActive, setIsScopeActive] = useState(false);
   const [spareMagazines, setSpareMagazines] = useState(2);
   const [pickerVisible, setPickerVisible] = useState(false);
-  const [scopeZero, setScopeZero] = useState({ x: 0, y: 0 });
   const [knifeThrowTarget, setKnifeThrowTarget] = useState({ x: 0, y: 0 });
   const [leaveError, setLeaveError] = useState('');
   const combatControlsDisabled = isBattleCombatDisabled({
@@ -175,7 +169,6 @@ export default function BattleScreen({
   });
   
   const aimAnim = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
-  const aimValue = useRef({ x: 0, y: 0 });
   
   const fireAnim = useRef(new Animated.Value(0)).current;
   const recoilAnim = useRef(new Animated.Value(0)).current;
@@ -189,19 +182,13 @@ export default function BattleScreen({
   const isLiveRef = useRef(false);
   const showAdRef = useRef(false);
   const isFiringRef = useRef(false);
-  const shotInFlightRef = useRef(false);
   const knifeThrowRunningRef = useRef(false);
   const knifeThrowRunRef = useRef(0);
   const lastFireTimeRef = useRef(0);
   const weaponRef = useRef(selectedWeapon);
   const activeGoldRef = useRef(activeGold);
   
-  const aimTouchRef = useRef<AimTouchLayerRef>(null);
   const reloadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const detectedMarkerRef = useRef<number | null>(null);
-  const markerLockRef = useRef<MarkerLockState>(createMarkerLockState());
-  const reticleHitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingShotRef = useRef<{ weaponId: WeaponId; shotId?: string } | null>(null);
   const fireOneRef = useRef<(fireMode?: 'primary' | 'throw') => boolean>(() => false);
   activeGoldRef.current = activeGold;
   
@@ -217,19 +204,11 @@ export default function BattleScreen({
       : null;
     if (nextIdentity !== sessionIdentityRef.current) {
       networkPendingRef.current.clear();
-      networkAmmoPendingRef.current.clear();
-      pendingShotRef.current = null;
-      shotInFlightRef.current = false;
-        markerLockRef.current = createMarkerLockState();
-        detectedMarkerRef.current = null;
-        setDetectedMarkerId(null);
       seenNetworkHitIdsRef.current.clear();
       suppressNextHealthFlashRef.current = false;
       if (suppressHealthFlashTimeoutRef.current) clearTimeout(suppressHealthFlashTimeoutRef.current);
       suppressHealthFlashTimeoutRef.current = null;
       previousHealthRef.current = null;
-      setNetworkHitTest(false);
-      setNetworkTargetId(null);
     }
     sessionIdentityRef.current = nextIdentity;
     if (battleSession?.sessionToken && battleSession.sessionToken !== sessionTokenRef.current) {
@@ -285,7 +264,6 @@ export default function BattleScreen({
 
   const stopActions = () => {
       isFiringRef.current = false;
-      aimTouchRef.current?.cancel();
        stopKnifeThrow();
       if (reloadTimeoutRef.current) clearTimeout(reloadTimeoutRef.current);
       reloadTimeoutRef.current = null;
@@ -320,9 +298,7 @@ export default function BattleScreen({
     reloadingRef.current = false;
     setIsReloading(false);
     isFiringRef.current = false;
-    aimTouchRef.current?.cancel();
     setIsScopeActive(false);
-    setScopeZero({ x: 0, y: 0 });
 
     if (reloadTimeoutRef.current) {
       clearTimeout(reloadTimeoutRef.current);
@@ -376,18 +352,11 @@ export default function BattleScreen({
       if (!combatReady || showAd) stopActions();
    }, [combatReady, showAd]);
 
-  const updateAim = useCallback((x: number, y: number) => {
-    const nextAim = clampAimOffset({ x, y }, width, height);
-    aimValue.current = nextAim;
-    aimAnim.setValue(nextAim);
-  }, [aimAnim, height, width]);
-  
   useEffect(() => {
       return () => {
         if (reloadTimeoutRef.current) clearTimeout(reloadTimeoutRef.current);
         if (flashTimeoutRef.current) clearTimeout(flashTimeoutRef.current);
         if (suppressHealthFlashTimeoutRef.current) clearTimeout(suppressHealthFlashTimeoutRef.current);
-        if (reticleHitTimeoutRef.current) clearTimeout(reticleHitTimeoutRef.current);
         fireAnim.stopAnimation();
         recoilAnim.stopAnimation();
         knifeThrowRunRef.current += 1;
@@ -398,29 +367,12 @@ export default function BattleScreen({
    }, [fireAnim, knifeThrowAnim, recoilAnim]);
 
   useEffect(() => {
-    detectedMarkerRef.current = detectedMarkerId;
-  }, [detectedMarkerId]);
-
-  useEffect(() => {
-    if (!networkHitTest) return;
-    const liveOpponents = room?.players.filter((player) =>
-      player.id !== ownPlayer?.id && player.alive
-    ) ?? [];
-    const validTarget = liveOpponents.some((player) => player.id === networkTargetId);
-    // In a two-player test there is no ambiguity: make the sole opponent the
-    // target so seeing their roster name is not mistaken for a manual lock.
-    if (liveOpponents.length === 1 && !validTarget) setNetworkTargetId(liveOpponents[0].id);
-    else if (!validTarget) setNetworkTargetId(null);
-  }, [networkHitTest, networkTargetId, ownPlayer?.id, room?.players]);
-
-  useEffect(() => {
     const event = networkSocket.lastHit;
     if (!event || !battleSession) return;
     if (seenNetworkHitIdsRef.current.has(event.shotId)) return;
     seenNetworkHitIdsRef.current.add(event.shotId);
     if (event.shooterId === battleSession.playerId) {
       showFlash('hit');
-      showReticleHit();
       setShotMessage('Vuruş onaylandı');
     }
     if (event.targetId === battleSession.playerId) {
@@ -437,36 +389,12 @@ export default function BattleScreen({
   useEffect(() => {
     for (const ack of networkSocket.ackEvents) {
       if (!ack.shotId || !networkPendingRef.current.has(ack.shotId)) continue;
-      const pending = networkPendingRef.current.get(ack.shotId);
       networkPendingRef.current.delete(ack.shotId);
       if (ack.accepted === true) {
-        networkAmmoPendingRef.current.delete(ack.shotId);
         setShotMessage('Vuruş gönderildi');
       } else if (ack.accepted === false) {
-        if (networkAmmoPendingRef.current.delete(ack.shotId) && pending) {
-          const weapon = getWeapon(pending.weaponId);
-          if (weaponRef.current === pending.weaponId) {
-            const restoredAmmo = Math.min(weapon.capacity, ammoRef.current + 1);
-            ammoRef.current = restoredAmmo;
-            setAmmo(restoredAmmo);
-          } else {
-            const saved = magazineInventoryRef.current.weapons[pending.weaponId];
-            if (saved) {
-              magazineInventoryRef.current = setMagazineAmmo(
-                magazineInventoryRef.current,
-                pending.weaponId,
-                weapon.capacity,
-                saved.ammo + 1,
-              );
-            }
-          }
-        }
         setShotMessage(shotStatus(ack.reason));
       } else {
-        // Transport exhaustion is indeterminate: the server may have applied
-        // this shot before the ack was lost. Clear the local capacity but never
-        // refund ammo unless the server explicitly rejected the shot.
-        networkAmmoPendingRef.current.delete(ack.shotId);
         setShotMessage('Vuruş durumu doğrulanamadı');
       }
     }
@@ -495,15 +423,6 @@ export default function BattleScreen({
     flashTimeoutRef.current = setTimeout(() => setCombatFlash(null), 420);
   };
 
-  const showReticleHit = () => {
-    setReticleHit(true);
-    if (reticleHitTimeoutRef.current) clearTimeout(reticleHitTimeoutRef.current);
-    reticleHitTimeoutRef.current = setTimeout(() => {
-      setReticleHit(false);
-      reticleHitTimeoutRef.current = null;
-    }, 650);
-  };
-
   useEffect(() => {
     if (!ownPlayer) return;
     const previous = previousHealthRef.current;
@@ -518,60 +437,6 @@ export default function BattleScreen({
     if (!battleSession || sessionExpired || !isGoneBattleSession(roomQuery.error)) return;
     handleSessionExpired();
   }, [battleSession, handleSessionExpired, roomQuery.error, sessionExpired]);
-
-  const restoreRejectedShot = () => {
-    const pendingShot = pendingShotRef.current;
-    if (!pendingShot) return;
-    pendingShotRef.current = null;
-    const weapon = getWeapon(pendingShot.weaponId);
-    const saved = magazineInventoryRef.current.weapons[pendingShot.weaponId];
-    if (weaponRef.current === pendingShot.weaponId) {
-      const restoredAmmo = Math.min(weapon.capacity, ammoRef.current + 1);
-      ammoRef.current = restoredAmmo;
-      setAmmo(restoredAmmo);
-    } else if (saved) {
-      magazineInventoryRef.current = setMagazineAmmo(
-        magazineInventoryRef.current,
-        pendingShot.weaponId,
-        weapon.capacity,
-        saved.ammo + 1,
-      );
-    }
-  };
-
-  const shot = useFireBattleShot({
-    request: authRequest,
-    mutation: {
-      onSuccess: (result) => {
-        if (result.accepted) {
-          pendingShotRef.current = null;
-          showReticleHit();
-        } else {
-          restoreRejectedShot();
-        }
-        if (battleSession) {
-          queryClient.setQueryData(['/api/battle/state', battleSession.room.code, battleSession.sessionToken], {
-            playerId: battleSession.playerId,
-            sessionToken: battleSession.sessionToken,
-            room: result.room,
-          });
-        }
-         setShotMessage(result.accepted ? 'Vuruş onaylandı' : shotStatus((result as { reason?: string }).reason));
-        if (result.accepted) showFlash('hit');
-      },
-      onError: (requestError) => {
-         restoreRejectedShot();
-         if (isGoneBattleSession(requestError)) {
-           handleSessionExpired();
-           return;
-         }
-          setShotMessage('Vuruş gönderilemedi');
-      },
-      onSettled: () => {
-        releaseBattleShot(shotInFlightRef);
-      },
-    },
-  });
 
   const handleWeaponSelect = (id: WeaponId) => {
       setPickerVisible(false);
@@ -598,15 +463,12 @@ export default function BattleScreen({
     const w = getWeapon(weaponRef.current);
     const now = Date.now();
     const cooldown = HEAVY_COOLDOWN_MS[w.id] ?? w.interval;
-    if (fireMode === 'throw' && w.id !== 'knife') return false;
+    if (fireMode === 'throw' && w.archetype !== 'grenade' && w.id !== 'knife') return false;
     const hasKnifeInventory = activeGoldRef.current || w.id !== 'knife' || ammoRef.current > 0;
     const hasAmmo = activeGoldRef.current || (w.id === 'knife' ? hasKnifeInventory : ammoRef.current > 0);
     if (knifeThrowRunningRef.current || !isLiveRef.current || showAdRef.current || reloadingRef.current || !hasAmmo || now - lastFireTimeRef.current < cooldown) return false;
-    const markerId = detectedMarkerRef.current;
-    const networkTarget = room?.players.find((player) => player.id === networkTargetId && player.alive && player.id !== ownPlayer?.id);
-    const hasNetworkPath = !!battleSession && networkHitTest && !!networkTarget && networkSocket.connected;
-    const hasMarkerPath = !!battleSession && !networkHitTest && markerId !== null;
-    if (battleSession && hasMarkerPath && !tryAcquireBattleShot(shotInFlightRef)) return false;
+    const networkTargetState = getNetworkTarget(room?.players, ownPlayer?.id);
+    const networkTarget = networkTargetState.target;
     lastFireTimeRef.current = now;
     // This is intentionally after all local fire guards. The camera component
     // treats the torch as an optional visual aid and safely ignores unsupported
@@ -619,18 +481,17 @@ export default function BattleScreen({
     playShotRef.current(w.id);
     if (fireMode === 'throw') {
       fireAnim.stopAnimation();
-      fireAnim.setValue(0);
+      fireAnim.setValue(1);
+      Animated.timing(fireAnim, { toValue: 0, duration: 800, useNativeDriver: true }).start();
     } else {
       fireAnim.setValue(1);
       Animated.timing(fireAnim, { toValue: 0, duration: 150, useNativeDriver: true }).start();
     }
     recoilAnim.setValue(w.recoil * 3);
     Animated.spring(recoilAnim, { toValue: 0, friction: 6, tension: 120, useNativeDriver: true }).start();
-    if (networkHitTest && battleSession && networkTarget && networkSocket.connected) {
-      const consumedAmmo = !activeGoldRef.current && (w.id !== 'knife' || fireMode === 'throw');
+    if (battleSession && networkTarget && networkSocket.connected) {
       const shotId = createShotId();
       networkPendingRef.current.set(shotId, { weaponId: w.id });
-      if (consumedAmmo) networkAmmoPendingRef.current.add(shotId);
       const sent = networkSocket.sendShotIntent({
         shotId,
         targetPlayerId: networkTarget.id,
@@ -640,29 +501,10 @@ export default function BattleScreen({
       });
       if (!sent) {
         networkPendingRef.current.delete(shotId);
-        if (networkAmmoPendingRef.current.delete(shotId)) {
-          const restoredAmmo = Math.min(w.capacity, ammoRef.current + 1);
-          ammoRef.current = restoredAmmo;
-          setAmmo(restoredAmmo);
-        }
         setShotMessage('Ağ bağlantısı yok');
       } else {
         setShotMessage('Vuruş gönderiliyor');
       }
-    } else if (!networkHitTest && battleSession && markerId !== null) {
-      const consumedAmmo = !activeGoldRef.current && (w.id !== 'knife' || fireMode === 'throw');
-      if (consumedAmmo) pendingShotRef.current = { weaponId: w.id };
-      shot.mutate({
-        code: battleSession.room.code,
-        data: {
-          markerId,
-          firedAt: now,
-          weaponId: w.id,
-          fireMode,
-        },
-      } as Parameters<typeof shot.mutate>[0]);
-    } else if (battleSession && networkHitTest) {
-      setShotMessage(networkSocket.connected ? 'Hedef seçilmedi' : 'Ağ bağlantısı yok');
     }
     return true;
   };
@@ -723,6 +565,11 @@ export default function BattleScreen({
   const handleFirePress = () => {
     // A quick tap must fire even when released before the next animation frame.
     if (combatControlsDisabled) return;
+    const isGrenade = getWeapon(weaponRef.current).archetype === 'grenade';
+    if (isGrenade) {
+      handleThrow();
+      return;
+    }
     fireOne();
     isFiringRef.current = getWeapon(weaponRef.current).automatic
       && (activeGoldRef.current || ammoRef.current > 0)
@@ -731,12 +578,16 @@ export default function BattleScreen({
       && !showAdRef.current;
   };
 
-  const handleKnifeThrow = () => {
-    if (combatControlsDisabled || knifeThrowRunningRef.current || weaponRef.current !== 'knife') return;
-    const target = { ...aimValue.current };
+  const handleThrow = () => {
+    const weapon = getWeapon(weaponRef.current);
+    if (
+      combatControlsDisabled
+      || knifeThrowRunningRef.current
+      || (weapon.archetype !== 'grenade' && weapon.id !== 'knife')
+    ) return;
+    const target = { x: 0, y: 0 };
     if (!fireOne('throw')) return;
     isFiringRef.current = false;
-    aimTouchRef.current?.cancel();
     knifeThrowRunningRef.current = true;
     const runId = ++knifeThrowRunRef.current;
     setKnifeThrowTarget(target);
@@ -745,7 +596,7 @@ export default function BattleScreen({
     knifeThrowAnim.setValue(0);
     Animated.timing(knifeThrowAnim, {
       toValue: 1,
-      duration: 760,
+      duration: 800,
       useNativeDriver: true,
     }).start(() => {
       if (runId !== knifeThrowRunRef.current) return;
@@ -753,6 +604,10 @@ export default function BattleScreen({
       knifeThrowAnim.setValue(0);
       setIsKnifeThrowing(false);
     });
+  };
+
+  const handleKnifeThrow = () => {
+    if (weaponRef.current === 'knife') handleThrow();
   };
 
   useEffect(() => {
@@ -854,17 +709,10 @@ export default function BattleScreen({
     roomStatus: room?.status,
     roomError: roomQuery.isError || sessionExpired || !appActive,
     cameraLive: live && appActive,
-    detectedMarkerId,
+    hasActiveOpponent: hasValidAimedTarget,
   });
-  const adjustScope = (dx: number, dy: number) => {
-    setScopeZero(current => ({
-      x: Math.max(-32, Math.min(32, current.x + dx)),
-      y: Math.max(-32, Math.min(32, current.y + dy)),
-    }));
-  };
   
-  // Scaling around the viewport center keeps the aimed source point under the
-  // moved scope only when the outer translation equals (1 - zoom) * aim.
+  // The aim value remains at zero, so zooming always stays centered.
   const camTranslateX = Animated.multiply(aimAnim.x, Animated.subtract(1, zoomAnim));
   const camTranslateY = Animated.multiply(aimAnim.y, Animated.subtract(1, zoomAnim));
 
@@ -884,52 +732,27 @@ export default function BattleScreen({
                 setRestartKey((key) => key + 1);
               }
             }}
-            onFrame={(frame) => {
-              if (!room || !ownPlayer) return;
-                const detectedId = detectPlayerMarker(
-                frame,
-               room.players.filter((player) =>
-                 player.id !== ownPlayer.id
-                  && player.alive,
-               ),
-                aimValue.current,
-                { width, height },
-              );
-                const markerId = updateMarkerLock(markerLockRef.current, detectedId, Date.now(), {
-                  consecutiveFrames: 2,
-                  // Compatibility capture cadence is now 1000ms. Keep a
-                  // lock across one missed capture without making it stale.
-                  holdMs: 1250,
-                });
-                detectedMarkerRef.current = markerId;
-                setDetectedMarkerId((current) => current === markerId ? current : markerId);
-            }}
           />
         </Animated.View>
       </Animated.View>
 
-      <AimTouchLayer
-        ref={aimTouchRef}
-        disabled={!combatReady || showAd || isReloading || isKnifeThrowing}
-        onAim={updateAim}
-      />
       <VisionModeOverlay mode={visionMode} />
       <ScopeOverlay
         aimAnim={aimAnim}
         isScopeActive={isScopeActive && isScopedWeapon}
         zoom={w.zoom}
-        zeroOffset={scopeZero}
-        reticleColor={reticleHit ? '#ffd60a' : (detectedMarkerId !== null || (networkHitTest && networkTargetId !== null) ? '#ff453a' : '#00e5ff')}
+        zeroOffset={{ x: 0, y: 0 }}
+        reticleColor={hasValidAimedTarget ? '#ff453a' : '#34c759'}
       />
       <IronSightOverlay
         aimAnim={aimAnim}
         isActive={isScopeActive && !isScopedWeapon && w.archetype !== 'grenade'}
-        reticleColor={reticleHit ? '#ffd60a' : (detectedMarkerId !== null || (networkHitTest && networkTargetId !== null) ? '#ff453a' : '#00e5ff')}
+        reticleColor={hasValidAimedTarget ? '#ff453a' : '#34c759'}
       />
       <NormalReticle
         aimAnim={aimAnim}
         isScopeActive={isScopeActive}
-        color={reticleHit ? '#ffd60a' : (detectedMarkerId !== null || (networkHitTest && networkTargetId !== null) ? '#ff453a' : '#00e5ff')}
+        color={hasValidAimedTarget ? '#ff453a' : '#34c759'}
       />
       {targetedEffect && (
         <View
@@ -986,7 +809,7 @@ export default function BattleScreen({
                       : hudStatus === 'waiting'
                             ? t('ready')
                             : hudStatus === 'ready'
-                              ? `${t('ready')} ${detectedMarkerId! + 1}`
+                              ? t('ready')
                               : t('ready')}
                   </Text>
                 ) : null}
@@ -1032,57 +855,6 @@ export default function BattleScreen({
             </Pressable>
           </View>
          </View>
-          {battleSession && (
-            <View style={s.networkTestPanel} pointerEvents="box-none">
-              <Pressable
-                testID="network-hit-test-toggle"
-                accessibilityRole="switch"
-                accessibilityState={{ checked: networkHitTest, disabled: !networkSocket.connected }}
-                disabled={!networkSocket.connected || combatControlsDisabled}
-                onPress={() => {
-                  setNetworkHitTest((enabled) => !enabled);
-                  if (networkHitTest) setNetworkTargetId(null);
-                }}
-                style={[s.networkTestToggle, networkHitTest && s.networkTestToggleActive, (!networkSocket.connected || combatControlsDisabled) && s.disabledBtn]}
-              >
-                <Feather name="radio" size={14} color={networkHitTest ? colors.cyan : colors.foreground} />
-                <Text style={s.networkTestText}>{networkHitTest ? 'AĞ TESTİ AÇIK' : 'AĞ VURUŞ TESTİ'}</Text>
-                <Text style={s.networkTestStatus}>{networkSocket.connected ? '●' : '○'}</Text>
-              </Pressable>
-              {networkHitTest && (
-                <View style={s.networkTargetRow}>
-                  {room?.players.filter((player) => player.id !== ownPlayer?.id && player.alive).map((player) => (
-                    <Pressable
-                      key={player.id}
-                      testID={`network-target-${player.id}`}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: networkTargetId === player.id }}
-                      onPress={() => setNetworkTargetId(player.id)}
-                      style={[s.networkTarget, networkTargetId === player.id && s.networkTargetActive]}
-                    >
-                      <Text numberOfLines={1} style={s.networkTargetText}>{player.name}</Text>
-                    </Pressable>
-                  ))}
-                  {!room?.players.some((player) => player.id !== ownPlayer?.id && player.alive) && (
-                    <Text style={s.networkTargetEmpty}>Canlı hedef bekleniyor</Text>
-                  )}
-                </View>
-              )}
-            </View>
-          )}
-        {isScopeActive && isScopedWeapon && (
-           <View style={s.scopeAdjuster} pointerEvents={combatControlsDisabled ? 'none' : 'box-none'}>
-             <Text style={s.scopeAdjustTitle}>{uiText(locale, 'scopeAdjust')}</Text>
-              <Pressable accessibilityLabel={t('guide')} disabled={combatControlsDisabled} onPress={() => adjustScope(0, -4)} style={[s.scopeAdjustButton, combatControlsDisabled && s.disabledBtn]}><Feather name="chevron-up" size={18} color="#fff" /></Pressable>
-            <View style={s.scopeAdjustMiddle}>
-                <Pressable accessibilityLabel={t('guide')} disabled={combatControlsDisabled} onPress={() => adjustScope(-4, 0)} style={[s.scopeAdjustButton, combatControlsDisabled && s.disabledBtn]}><Feather name="chevron-left" size={18} color="#fff" /></Pressable>
-                <Pressable accessibilityLabel={t('settings')} disabled={combatControlsDisabled} onPress={() => setScopeZero({ x: 0, y: 0 })} style={[s.scopeAdjustButton, s.scopeReset, combatControlsDisabled && s.disabledBtn]}><Text style={s.scopeResetText}>0</Text></Pressable>
-                <Pressable accessibilityLabel={t('guide')} disabled={combatControlsDisabled} onPress={() => adjustScope(4, 0)} style={[s.scopeAdjustButton, combatControlsDisabled && s.disabledBtn]}><Feather name="chevron-right" size={18} color="#fff" /></Pressable>
-            </View>
-              <Pressable accessibilityLabel={t('guide')} disabled={combatControlsDisabled} onPress={() => adjustScope(0, 4)} style={[s.scopeAdjustButton, combatControlsDisabled && s.disabledBtn]}><Feather name="chevron-down" size={18} color="#fff" /></Pressable>
-          </View>
-        )}
-        
          <View style={s.bottomContainer} pointerEvents="box-none">
              <View style={s.statusRow} pointerEvents="box-none">
                  <View style={s.ammoContainer} pointerEvents="none">
@@ -2048,16 +1820,6 @@ const s = StyleSheet.create({
   markerHud: { minWidth: 90, maxWidth: 116, minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(0,0,0,0.7)', borderRadius: 13, paddingRight: 8 },
   markerHudText: { color: '#fff', fontSize: 13, fontWeight: '900' },
   markerHudTeam: { color: 'rgba(255,255,255,0.68)', fontSize: 8, fontWeight: '800', marginTop: 2 },
-  networkTestPanel: { width: '100%', marginTop: 6, gap: 5 },
-  networkTestToggle: { alignSelf: 'flex-start', minHeight: 30, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 9, borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.72)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.28)' },
-  networkTestToggleActive: { borderColor: '#72f1d0', backgroundColor: 'rgba(0,45,42,0.86)' },
-  networkTestText: { color: '#fff', fontSize: 9, fontWeight: '900', letterSpacing: 0.5 },
-  networkTestStatus: { color: '#72f1d0', fontSize: 12, fontWeight: '900' },
-  networkTargetRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
-  networkTarget: { maxWidth: 130, minHeight: 28, paddingHorizontal: 9, justifyContent: 'center', borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.68)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
-  networkTargetActive: { borderColor: '#00ccff', backgroundColor: 'rgba(0,60,80,0.9)' },
-  networkTargetText: { color: '#fff', fontSize: 9, fontWeight: '800' },
-  networkTargetEmpty: { color: 'rgba(255,255,255,0.65)', fontSize: 9, fontWeight: '700', paddingVertical: 7 },
   
   bottomContainer: { paddingHorizontal: 12, width: '100%', gap: 8 },
   statusRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minHeight: 28 },
@@ -2088,12 +1850,6 @@ const s = StyleSheet.create({
   scopeBtn: { width: 72, height: 72, borderRadius: 36, borderWidth: 2, borderColor: '#00ccff', backgroundColor: 'rgba(0,30,40,0.9)', alignItems: 'center', justifyContent: 'center', gap: 3 },
   scopeBtnActive: { backgroundColor: 'rgba(0,90,115,0.95)' },
   scopeButtonText: { color: '#8be9ff', fontSize: 12, fontWeight: '900' },
-  scopeAdjuster: { position: 'absolute', right: 18, top: '30%', alignItems: 'center', gap: 4, padding: 8, borderRadius: 14, backgroundColor: 'rgba(0,12,16,.7)', borderWidth: 1, borderColor: 'rgba(0,204,255,.55)' },
-  scopeAdjustTitle: { color: '#8be9ff', fontSize: 8, fontWeight: '900', letterSpacing: 1 },
-  scopeAdjustMiddle: { flexDirection: 'row', gap: 4 },
-  scopeAdjustButton: { width: 34, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(15,24,29,.92)', borderWidth: 1, borderColor: 'rgba(255,255,255,.24)' },
-  scopeReset: { borderColor: '#00ccff' },
-  scopeResetText: { color: '#fff', fontWeight: '900', fontSize: 12 },
   actionBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 10, flexShrink: 1 },
   
   // Keep recovery controls below the battle UI so the vision modes remain

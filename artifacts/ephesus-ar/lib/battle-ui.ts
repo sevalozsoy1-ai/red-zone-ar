@@ -29,19 +29,19 @@ export function battleHudStatus({
   roomStatus,
   roomError,
   cameraLive,
-  detectedMarkerId,
+  hasActiveOpponent,
 }: {
   hasBattleSession: boolean;
   roomStatus: BattleUiRoomStatus;
   roomError: boolean;
   cameraLive?: boolean;
-  detectedMarkerId: number | null;
+  hasActiveOpponent: boolean;
 }): 'error' | 'finished' | 'camera' | 'waiting' | 'ready' | 'local' {
   if (!hasBattleSession) return 'local';
   if (roomError) return 'error';
   if (roomStatus === 'finished') return 'finished';
   if (cameraLive === false) return 'camera';
-  return detectedMarkerId === null ? 'waiting' : 'ready';
+  return hasActiveOpponent ? 'ready' : 'waiting';
 }
 
 export function isGoneBattleSession(error: unknown): boolean {
@@ -75,4 +75,34 @@ export function tryAcquireBattleShot(inFlight: { current: boolean }): boolean {
 
 export function releaseBattleShot(inFlight: { current: boolean }): void {
   inFlight.current = false;
+}
+
+export type BattleTargetCandidate = {
+  id: string;
+  alive: boolean;
+  connected: boolean;
+  markerId?: number;
+};
+
+/**
+ * Keep the client-side network target rules in one place.  In particular, a
+ * player retained for reconnect grace is not a shootable target.
+ */
+export function getNetworkTarget(
+  players: BattleTargetCandidate[] | undefined,
+  ownPlayerId: string | undefined,
+): { target: BattleTargetCandidate | null; reason: 'OFFLINE' | 'NO_OPPONENT' | 'NO_TARGET' | null } {
+  const opponents = (players ?? []).filter((player) =>
+    player.id !== ownPlayerId && player.alive && player.connected
+  );
+  if (opponents.length === 0) {
+    const hasConnectedOpponent = (players ?? []).some((player) =>
+      player.id !== ownPlayerId && player.connected
+    );
+    return { target: null, reason: hasConnectedOpponent ? 'NO_TARGET' : 'NO_OPPONENT' };
+  }
+  return {
+    target: opponents[0] ?? null,
+    reason: null,
+  };
 }

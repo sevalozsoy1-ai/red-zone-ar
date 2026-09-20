@@ -1,0 +1,24 @@
+# Dependencies and generated output
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+tmp/
+**/.expo/
+**/.cache/
+*.tsbuildinfo
+**/*.apk
+**/*.aab
+
+# Workspace-only media and review material not used by the mobile bundle
+attached_assets/
+screenshots/
+google-play-assets/
+
+# Local tooling and repository metadata
+.git/
+.local/
+.agents/
+.vscode/
+.idea/
+*.log
