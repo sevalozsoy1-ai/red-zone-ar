@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   battleHudStatus,
+  getNetworkTarget,
   isBattleCombatDisabled,
   isGoneBattleSession,
   releaseBattleShot,
@@ -32,6 +33,23 @@ test('finished and unavailable rooms disable every combat control', () => {
 test('knife throw draw lock blocks controls while the active battle is otherwise ready', () => {
   assert.equal(isBattleCombatDisabled({ ...activeCombat, actionLocked: true }), true);
   assert.equal(isBattleCombatDisabled({ ...activeCombat, actionLocked: false }), false);
+});
+
+test('network targeting requires the marker currently inside the reticle', () => {
+  const players = [
+    { id: 'self', alive: true, connected: true, markerId: 0 },
+    { id: 'dead', alive: false, connected: true, markerId: 1 },
+    { id: 'away', alive: true, connected: false, markerId: 2 },
+    { id: 'live', alive: true, connected: true, markerId: 3 },
+  ];
+  const selected = getNetworkTarget(players, 'self', 3);
+  assert.equal(selected.target?.id, 'live');
+  assert.equal(selected.reason, null);
+  assert.equal(getNetworkTarget(players, 'self', null).reason, 'NO_TARGET');
+  assert.equal(getNetworkTarget(players, 'self', 1).reason, 'NO_TARGET');
+  assert.equal(getNetworkTarget(players, 'self', 2).reason, 'NO_TARGET');
+  assert.equal(getNetworkTarget(players.slice(0, 3), 'self', null).reason, 'NO_TARGET');
+  assert.equal(getNetworkTarget([players[0], players[2]], 'self', null).reason, 'NO_OPPONENT');
 });
 
 test('finished and error HUD states never fall back to waiting', () => {

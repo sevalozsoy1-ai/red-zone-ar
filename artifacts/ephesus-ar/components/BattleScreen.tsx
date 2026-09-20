@@ -37,7 +37,7 @@ import PlayerMarker from './PlayerMarker';
 import { clampAimOffset } from '@/lib/aim';
 import { weaponActionLabel, weaponCategoryLabel, uiText } from '@/lib/i18n';
 import { rtlLayout } from '@/lib/rtl';
-import { battleHudStatus, isBattleCombatDisabled, isGoneBattleSession, releaseBattleShot, tryAcquireBattleShot } from '@/lib/battle-ui';
+import { battleHudStatus, getNetworkTarget, isBattleCombatDisabled, isGoneBattleSession, releaseBattleShot, tryAcquireBattleShot } from '@/lib/battle-ui';
 import { setBattleSessionToken } from '@/lib/battle-auth';
 import { economyText, formatUsdFromCents } from '@/lib/economy-ui';
 import {
@@ -135,6 +135,12 @@ export default function BattleScreen({
     reloading: false,
   });
   const [detectedMarkerId, setDetectedMarkerId] = useState<number | null>(null);
+  const aimedNetworkTarget = getNetworkTarget(
+    room?.players,
+    ownPlayer?.id,
+    detectedMarkerId,
+  ).target;
+  const hasValidAimedTarget = aimedNetworkTarget !== null;
   const [reticleHit, setReticleHit] = useState(false);
   const [combatFlash, setCombatFlash] = useState<'hit' | 'hurt' | null>(null);
   const [shotMessage, setShotMessage] = useState('');
@@ -146,7 +152,6 @@ export default function BattleScreen({
   // acknowledgements in flight at once. The server remains authoritative for
   // cadence and idempotency; these maps only reconcile local ammo/UI state.
   const networkPendingRef = useRef(new Map<string, { weaponId: WeaponId }>());
-  const networkAmmoPendingRef = useRef(new Set<string>());
   const seenNetworkHitIdsRef = useRef(new Set<string>());
   const flashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
@@ -201,7 +206,6 @@ export default function BattleScreen({
   const detectedMarkerRef = useRef<number | null>(null);
   const markerLockRef = useRef<MarkerLockState>(createMarkerLockState());
   const reticleHitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingShotRef = useRef<{ weaponId: WeaponId; shotId?: string } | null>(null);
   const fireOneRef = useRef<(fireMode?: 'primary' | 'throw') => boolean>(() => false);
   activeGoldRef.current = activeGold;
   
@@ -217,8 +221,6 @@ export default function BattleScreen({
       : null;
     if (nextIdentity !== sessionIdentityRef.current) {
       networkPendingRef.current.clear();
-      networkAmmoPendingRef.current.clear();
-      pendingShotRef.current = null;
       shotInFlightRef.current = false;
         markerLockRef.current = createMarkerLockState();
         detectedMarkerRef.current = null;
@@ -403,15 +405,11 @@ export default function BattleScreen({
 
   useEffect(() => {
     if (!networkHitTest) return;
-    const liveOpponents = room?.players.filter((player) =>
-      player.id !== ownPlayer?.id && player.alive
-    ) ?? [];
-    const validTarget = liveOpponents.some((player) => player.id === networkTargetId);
-    // In a two-player test there is no ambiguity: make the sole opponent the
-    // target so seeing their roster name is not mistaken for a manual lock.
-    if (liveOpponents.length === 1 && !validTarget) setNetworkTargetId(liveOpponents[0].id);
-    else if (!validTarget) setNetworkTargetId(null);
-  }, [networkHitTest, networkTargetId, ownPlayer?.id, room?.players]);
+    const nextTargetId = aimedNetworkTarget?.id ?? null;
+    // The highlighted network target must be the opponent currently recognized
+    // inside the camera reticle, never merely a player present in the room.
+    if (nextTargetId !== networkTargetId) setNetworkTargetId(nextTargetId);
+  }, [aimedNetworkTarget?.id, networkHitTest, networkTargetId]);
 
   useEffect(() => {
     const event = networkSocket.lastHit;
@@ -437,36 +435,12 @@ export default function BattleScreen({
   useEffect(() => {
     for (const ack of networkSocket.ackEvents) {
       if (!ack.shotId || !networkPendingRef.current.has(ack.shotId)) continue;
-      const pending = networkPendingRef.current.get(ack.shotId);
       networkPendingRef.current.delete(ack.shotId);
       if (ack.accepted === true) {
-        networkAmmoPendingRef.current.delete(ack.shotId);
         setShotMessage('Vuruş gönderildi');
       } else if (ack.accepted === false) {
-        if (networkAmmoPendingRef.current.delete(ack.shotId) && pending) {
-          const weapon = getWeapon(pending.weaponId);
-          if (weaponRef.current === pending.weaponId) {
-            const restoredAmmo = Math.min(weapon.capacity, ammoRef.current + 1);
-            ammoRef.current = restoredAmmo;
-            setAmmo(restoredAmmo);
-          } else {
-            const saved = magazineInventoryRef.current.weapons[pending.weaponId];
-            if (saved) {
-              magazineInventoryRef.current = setMagazineAmmo(
-                magazineInventoryRef.current,
-                pending.weaponId,
-                weapon.capacity,
-                saved.ammo + 1,
-              );
-            }
-          }
-        }
         setShotMessage(shotStatus(ack.reason));
       } else {
-        // Transport exhaustion is indeterminate: the server may have applied
-        // this shot before the ack was lost. Clear the local capacity but never
-        // refund ammo unless the server explicitly rejected the shot.
-        networkAmmoPendingRef.current.delete(ack.shotId);
         setShotMessage('Vuruş durumu doğrulanamadı');
       }
     }
@@ -519,35 +493,12 @@ export default function BattleScreen({
     handleSessionExpired();
   }, [battleSession, handleSessionExpired, roomQuery.error, sessionExpired]);
 
-  const restoreRejectedShot = () => {
-    const pendingShot = pendingShotRef.current;
-    if (!pendingShot) return;
-    pendingShotRef.current = null;
-    const weapon = getWeapon(pendingShot.weaponId);
-    const saved = magazineInventoryRef.current.weapons[pendingShot.weaponId];
-    if (weaponRef.current === pendingShot.weaponId) {
-      const restoredAmmo = Math.min(weapon.capacity, ammoRef.current + 1);
-      ammoRef.current = restoredAmmo;
-      setAmmo(restoredAmmo);
-    } else if (saved) {
-      magazineInventoryRef.current = setMagazineAmmo(
-        magazineInventoryRef.current,
-        pendingShot.weaponId,
-        weapon.capacity,
-        saved.ammo + 1,
-      );
-    }
-  };
-
   const shot = useFireBattleShot({
     request: authRequest,
     mutation: {
       onSuccess: (result) => {
         if (result.accepted) {
-          pendingShotRef.current = null;
           showReticleHit();
-        } else {
-          restoreRejectedShot();
         }
         if (battleSession) {
           queryClient.setQueryData(['/api/battle/state', battleSession.room.code, battleSession.sessionToken], {
@@ -560,7 +511,6 @@ export default function BattleScreen({
         if (result.accepted) showFlash('hit');
       },
       onError: (requestError) => {
-         restoreRejectedShot();
          if (isGoneBattleSession(requestError)) {
            handleSessionExpired();
            return;
@@ -598,15 +548,13 @@ export default function BattleScreen({
     const w = getWeapon(weaponRef.current);
     const now = Date.now();
     const cooldown = HEAVY_COOLDOWN_MS[w.id] ?? w.interval;
-    if (fireMode === 'throw' && w.id !== 'knife') return false;
+    if (fireMode === 'throw' && w.archetype !== 'grenade' && w.id !== 'knife') return false;
     const hasKnifeInventory = activeGoldRef.current || w.id !== 'knife' || ammoRef.current > 0;
     const hasAmmo = activeGoldRef.current || (w.id === 'knife' ? hasKnifeInventory : ammoRef.current > 0);
     if (knifeThrowRunningRef.current || !isLiveRef.current || showAdRef.current || reloadingRef.current || !hasAmmo || now - lastFireTimeRef.current < cooldown) return false;
     const markerId = detectedMarkerRef.current;
-    const networkTarget = room?.players.find((player) => player.id === networkTargetId && player.alive && player.id !== ownPlayer?.id);
-    const hasNetworkPath = !!battleSession && networkHitTest && !!networkTarget && networkSocket.connected;
-    const hasMarkerPath = !!battleSession && !networkHitTest && markerId !== null;
-    if (battleSession && hasMarkerPath && !tryAcquireBattleShot(shotInFlightRef)) return false;
+    const networkTargetState = getNetworkTarget(room?.players, ownPlayer?.id, markerId);
+    const networkTarget = networkTargetState.target;
     lastFireTimeRef.current = now;
     // This is intentionally after all local fire guards. The camera component
     // treats the torch as an optional visual aid and safely ignores unsupported
@@ -619,7 +567,8 @@ export default function BattleScreen({
     playShotRef.current(w.id);
     if (fireMode === 'throw') {
       fireAnim.stopAnimation();
-      fireAnim.setValue(0);
+      fireAnim.setValue(1);
+      Animated.timing(fireAnim, { toValue: 0, duration: 800, useNativeDriver: true }).start();
     } else {
       fireAnim.setValue(1);
       Animated.timing(fireAnim, { toValue: 0, duration: 150, useNativeDriver: true }).start();
@@ -627,10 +576,8 @@ export default function BattleScreen({
     recoilAnim.setValue(w.recoil * 3);
     Animated.spring(recoilAnim, { toValue: 0, friction: 6, tension: 120, useNativeDriver: true }).start();
     if (networkHitTest && battleSession && networkTarget && networkSocket.connected) {
-      const consumedAmmo = !activeGoldRef.current && (w.id !== 'knife' || fireMode === 'throw');
       const shotId = createShotId();
       networkPendingRef.current.set(shotId, { weaponId: w.id });
-      if (consumedAmmo) networkAmmoPendingRef.current.add(shotId);
       const sent = networkSocket.sendShotIntent({
         shotId,
         targetPlayerId: networkTarget.id,
@@ -640,18 +587,12 @@ export default function BattleScreen({
       });
       if (!sent) {
         networkPendingRef.current.delete(shotId);
-        if (networkAmmoPendingRef.current.delete(shotId)) {
-          const restoredAmmo = Math.min(w.capacity, ammoRef.current + 1);
-          ammoRef.current = restoredAmmo;
-          setAmmo(restoredAmmo);
-        }
         setShotMessage('Ağ bağlantısı yok');
       } else {
         setShotMessage('Vuruş gönderiliyor');
       }
-    } else if (!networkHitTest && battleSession && markerId !== null) {
-      const consumedAmmo = !activeGoldRef.current && (w.id !== 'knife' || fireMode === 'throw');
-      if (consumedAmmo) pendingShotRef.current = { weaponId: w.id };
+    } else if (!networkHitTest && battleSession && networkTarget && markerId !== null) {
+      if (!tryAcquireBattleShot(shotInFlightRef)) return true;
       shot.mutate({
         code: battleSession.room.code,
         data: {
@@ -661,8 +602,6 @@ export default function BattleScreen({
           fireMode,
         },
       } as Parameters<typeof shot.mutate>[0]);
-    } else if (battleSession && networkHitTest) {
-      setShotMessage(networkSocket.connected ? 'Hedef seçilmedi' : 'Ağ bağlantısı yok');
     }
     return true;
   };
@@ -723,6 +662,11 @@ export default function BattleScreen({
   const handleFirePress = () => {
     // A quick tap must fire even when released before the next animation frame.
     if (combatControlsDisabled) return;
+    const isGrenade = getWeapon(weaponRef.current).archetype === 'grenade';
+    if (isGrenade) {
+      handleThrow();
+      return;
+    }
     fireOne();
     isFiringRef.current = getWeapon(weaponRef.current).automatic
       && (activeGoldRef.current || ammoRef.current > 0)
@@ -731,8 +675,13 @@ export default function BattleScreen({
       && !showAdRef.current;
   };
 
-  const handleKnifeThrow = () => {
-    if (combatControlsDisabled || knifeThrowRunningRef.current || weaponRef.current !== 'knife') return;
+  const handleThrow = () => {
+    const weapon = getWeapon(weaponRef.current);
+    if (
+      combatControlsDisabled
+      || knifeThrowRunningRef.current
+      || (weapon.archetype !== 'grenade' && weapon.id !== 'knife')
+    ) return;
     const target = { ...aimValue.current };
     if (!fireOne('throw')) return;
     isFiringRef.current = false;
@@ -745,7 +694,7 @@ export default function BattleScreen({
     knifeThrowAnim.setValue(0);
     Animated.timing(knifeThrowAnim, {
       toValue: 1,
-      duration: 760,
+      duration: 800,
       useNativeDriver: true,
     }).start(() => {
       if (runId !== knifeThrowRunRef.current) return;
@@ -753,6 +702,10 @@ export default function BattleScreen({
       knifeThrowAnim.setValue(0);
       setIsKnifeThrowing(false);
     });
+  };
+
+  const handleKnifeThrow = () => {
+    if (weaponRef.current === 'knife') handleThrow();
   };
 
   useEffect(() => {
@@ -890,7 +843,8 @@ export default function BattleScreen({
                 frame,
                room.players.filter((player) =>
                  player.id !== ownPlayer.id
-                  && player.alive,
+                   && player.alive
+                   && player.connected,
                ),
                 aimValue.current,
                 { width, height },
@@ -919,17 +873,17 @@ export default function BattleScreen({
         isScopeActive={isScopeActive && isScopedWeapon}
         zoom={w.zoom}
         zeroOffset={scopeZero}
-        reticleColor={reticleHit ? '#ffd60a' : (detectedMarkerId !== null || (networkHitTest && networkTargetId !== null) ? '#ff453a' : '#00e5ff')}
+        reticleColor={reticleHit ? '#ffd60a' : (hasValidAimedTarget ? '#ff453a' : '#00e5ff')}
       />
       <IronSightOverlay
         aimAnim={aimAnim}
         isActive={isScopeActive && !isScopedWeapon && w.archetype !== 'grenade'}
-        reticleColor={reticleHit ? '#ffd60a' : (detectedMarkerId !== null || (networkHitTest && networkTargetId !== null) ? '#ff453a' : '#00e5ff')}
+        reticleColor={reticleHit ? '#ffd60a' : (hasValidAimedTarget ? '#ff453a' : '#00e5ff')}
       />
       <NormalReticle
         aimAnim={aimAnim}
         isScopeActive={isScopeActive}
-        color={reticleHit ? '#ffd60a' : (detectedMarkerId !== null || (networkHitTest && networkTargetId !== null) ? '#ff453a' : '#00e5ff')}
+        color={reticleHit ? '#ffd60a' : (hasValidAimedTarget ? '#ff453a' : '#00e5ff')}
       />
       {targetedEffect && (
         <View
@@ -1051,19 +1005,20 @@ export default function BattleScreen({
               </Pressable>
               {networkHitTest && (
                 <View style={s.networkTargetRow}>
-                  {room?.players.filter((player) => player.id !== ownPlayer?.id && player.alive).map((player) => (
-                    <Pressable
+                  {room?.players.filter((player) =>
+                    player.id !== ownPlayer?.id && player.alive && player.connected
+                  ).map((player) => (
+                    <View
                       key={player.id}
                       testID={`network-target-${player.id}`}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: networkTargetId === player.id }}
-                      onPress={() => setNetworkTargetId(player.id)}
                       style={[s.networkTarget, networkTargetId === player.id && s.networkTargetActive]}
                     >
                       <Text numberOfLines={1} style={s.networkTargetText}>{player.name}</Text>
-                    </Pressable>
+                    </View>
                   ))}
-                  {!room?.players.some((player) => player.id !== ownPlayer?.id && player.alive) && (
+                  {!room?.players.some((player) =>
+                    player.id !== ownPlayer?.id && player.alive && player.connected
+                  ) && (
                     <Text style={s.networkTargetEmpty}>Canlı hedef bekleniyor</Text>
                   )}
                 </View>

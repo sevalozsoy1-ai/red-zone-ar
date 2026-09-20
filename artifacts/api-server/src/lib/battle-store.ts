@@ -1010,7 +1010,9 @@ async function fireShotUnlocked(
   else if (!shooter?.alive) { accepted = false; reason = "Yeniden doğmayı bekliyorsun"; }
   else if (!target || target.id === playerId) { accepted = false; reason = "Geçersiz hedef"; }
   else if (!target.alive || target.lives <= 0) { accepted = false; reason = "Hedef aktif değil"; }
-  else if (weapon.action === "grenade" && fireMode !== "primary") { accepted = false; reason = "El bombası atış türü geçersiz"; }
+  else if (!target.connected) { accepted = false; reason = "Hedef bağlantısı yok"; }
+  // Grenades use the explicit throw mode, while accepting primary for
+  // already-shipped clients that predate the throw contract.
   else if (weapon.action !== "grenade" && weaponId === "knife" && fireMode !== "primary" && fireMode !== "throw") {
     accepted = false; reason = "Bıçak atış türü geçersiz";
   }

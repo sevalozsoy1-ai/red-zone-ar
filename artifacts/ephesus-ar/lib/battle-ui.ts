@@ -76,3 +76,37 @@ export function tryAcquireBattleShot(inFlight: { current: boolean }): boolean {
 export function releaseBattleShot(inFlight: { current: boolean }): void {
   inFlight.current = false;
 }
+
+export type BattleTargetCandidate = {
+  id: string;
+  alive: boolean;
+  connected: boolean;
+  markerId?: number;
+};
+
+/**
+ * Keep the client-side network target rules in one place.  In particular, a
+ * player retained for reconnect grace is not a shootable target.
+ */
+export function getNetworkTarget(
+  players: BattleTargetCandidate[] | undefined,
+  ownPlayerId: string | undefined,
+  detectedMarkerId: number | null,
+): { target: BattleTargetCandidate | null; reason: 'OFFLINE' | 'NO_OPPONENT' | 'NO_TARGET' | null } {
+  const opponents = (players ?? []).filter((player) =>
+    player.id !== ownPlayerId && player.alive && player.connected
+  );
+  if (opponents.length === 0) {
+    const hasConnectedOpponent = (players ?? []).some((player) =>
+      player.id !== ownPlayerId && player.connected
+    );
+    return { target: null, reason: hasConnectedOpponent ? 'NO_TARGET' : 'NO_OPPONENT' };
+  }
+  const aimed = detectedMarkerId === null
+    ? undefined
+    : opponents.find((player) => player.markerId === detectedMarkerId);
+  return {
+    target: aimed ?? null,
+    reason: aimed ? null : 'NO_TARGET',
+  };
+}
