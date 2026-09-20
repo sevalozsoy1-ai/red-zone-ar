@@ -168,15 +168,15 @@ test("deduplicates concurrent socket and HTTP delivery of the same network shot"
   assert.ok(joined.room.updatedAt > room.updatedAt);
 });
 
-test("rejects disconnected targets on marker and network shot paths", async () => {
+test("accepts camera-confirmed targets while their presence heartbeat catches up", async () => {
   const { host, opponent } = await activeRoom();
   const targetMarker = opponent.room.players.find((player) => player.id === opponent.playerId).markerId;
   now += LEASE_TIMEOUT_MS + 1;
 
   const markerShot = await fireShot(host.room.code, host.sessionToken, targetMarker, now, "m4a1", "primary");
-  assert.equal(markerShot.accepted, false);
-  assert.equal(markerShot.reason, "Hedef bağlantısı yok");
+  assert.equal(markerShot.accepted, true);
 
+  now += 1000;
   const networkShot = await fireShotByPlayerId(
     host.room.code,
     host.sessionToken,
@@ -186,10 +186,12 @@ test("rejects disconnected targets on marker and network shot paths", async () =
     "m4a1",
     "primary",
   );
-  assert.equal(networkShot.accepted, false);
-  assert.equal(networkShot.reason, "Hedef bağlantısı yok");
+  assert.equal(networkShot.accepted, true);
   const room = (await getRoom(host.room.code, host.sessionToken)).room;
-  assert.equal(room.players.find((player) => player.id === opponent.playerId).hp, 100);
+  assert.equal(
+    room.players.find((player) => player.id === opponent.playerId).hp,
+    100 - markerShot.damage - networkShot.damage,
+  );
 });
 
 test("deduplicates a network shot after the store is rehydrated", async () => {
