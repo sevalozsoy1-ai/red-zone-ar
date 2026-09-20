@@ -44,6 +44,11 @@ import {
   type CommerceLedger,
   type CreditPackageId,
 } from '@/lib/commerce';
+import {
+  DEFAULT_AUDIO_VOLUMES,
+  normalizeAudioVolumes,
+  type AudioVolumes,
+} from '@/lib/audio-settings';
 
 export type CountryCode = 'TR' | 'DE' | 'UA' | 'US';
 export type LanguageCode = Locale;
@@ -70,6 +75,7 @@ type PersistedState = {
   cancelledActions?: unknown;
   soloAccessDay?: unknown;
   teamMatchIds?: unknown;
+  audioVolumes?: unknown;
 };
 
 type GameState = {
@@ -90,6 +96,7 @@ type GameState = {
   cancelledActions: Record<string, PendingEconomyAction>;
   soloAccessDay: string | null;
   teamMatchIds: string[];
+  audioVolumes: AudioVolumes;
 };
 
 type SimulationSnapshot = Pick<GameState, 'creditCents' | 'unlockedWeapons' | 'weaponUnlocks' | 'commerce'>;
@@ -175,6 +182,8 @@ type GameContextValue = {
   commitAction: (transactionId: string, now?: number) => ActionCommitResult;
   cancelAction: (transactionId: string) => ActionCommitResult;
   pendingActions: Readonly<Record<string, PendingEconomyAction>>;
+  audioVolumes: AudioVolumes;
+  setAudioVolumes: (patch: Partial<AudioVolumes>) => void;
 };
 
 const defaults: GameState = {
@@ -195,6 +204,7 @@ const defaults: GameState = {
   cancelledActions: {},
   soloAccessDay: null,
   teamMatchIds: [],
+  audioVolumes: DEFAULT_AUDIO_VOLUMES,
 };
 
 const GameContext = createContext<GameContextValue | null>(null);
@@ -272,6 +282,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
               teamMatchIds: Array.isArray(persisted.teamMatchIds)
                 ? persisted.teamMatchIds.filter((value): value is string => typeof value === 'string')
                 : [],
+              audioVolumes: normalizeAudioVolumes(persisted.audioVolumes),
             };
             const restoredEconomy = restorePendingActions(hydratedState);
             const nextState: GameState = {
@@ -569,6 +580,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
        recordAdClick,
        commitAction,
        cancelAction,
+       audioVolumes: state.audioVolumes,
+       setAudioVolumes: (patch) => update({ audioVolumes: normalizeAudioVolumes({ ...stateRef.current.audioVolumes, ...patch }) }),
     };
     }, [clock, ready, setCountry, setLanguage, setOnboarded, state]);
 

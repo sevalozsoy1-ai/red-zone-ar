@@ -8,6 +8,7 @@ import {
 } from '@/lib/audio-readiness';
 import { getWeapon, type WeaponId } from '@/lib/weapons';
 import { WEAPON_SOUNDS } from '@/lib/weapon-assets';
+import { effectiveWeaponVolume } from '@/lib/audio-settings';
 
 type SoundKey = WeaponId | 'reload';
 
@@ -28,12 +29,13 @@ type WebkitWindow = Window & typeof globalThis & {
 };
 
 export function useWeaponAudio(): WeaponAudio {
-  const { ready: gameReady } = useGame();
+  const { ready: gameReady, audioVolumes } = useGame();
   const [error, setError] = useState<string | null>(null);
   const context = useRef<AudioContext | null>(null);
   const buffers = useRef<Partial<Record<SoundKey, AudioBuffer>>>({});
   const loading = useRef<Partial<Record<SoundKey, Promise<void>>>>({});
   const sources = useRef(new Set<AudioBufferSourceNode>());
+  const gains = useRef(new Map<AudioBufferSourceNode, GainNode>());
   const lastPlayed = useRef<Partial<Record<SoundKey, number>>>({});
   const deferredKeys = useRef(new Set<SoundKey>());
   const mounted = useRef(true);
@@ -46,8 +48,10 @@ export function useWeaponAudio(): WeaponAudio {
         // A source which has already ended cannot always be stopped again.
       }
       source.disconnect();
+      gains.current.get(source)?.disconnect();
     });
     sources.current.clear();
+    gains.current.clear();
   }, []);
 
   const ensureContext = useCallback(() => {
@@ -161,18 +165,29 @@ export function useWeaponAudio(): WeaponAudio {
         assertAudioOutputAvailable(audioContext);
         const source = audioContext.createBufferSource();
         source.buffer = buffer;
-        source.connect(audioContext.destination);
+         const gain = audioContext.createGain();
+         gain.gain.value = effectiveWeaponVolume(audioVolumes);
+         source.connect(gain);
+         gain.connect(audioContext.destination);
         sources.current.add(source);
+         gains.current.set(source, gain);
         source.onended = () => {
           sources.current.delete(source);
+           gains.current.delete(source);
           source.disconnect();
+           gain.disconnect();
         };
         source.start();
       })
       .catch(() => {
         if (mounted.current) setError('Ses oynatılamadı. SESİ DENE düğmesine tekrar basın.');
       });
-  }, [ensureContext, gameReady, loadBuffer]);
+  }, [audioVolumes, ensureContext, gameReady, loadBuffer]);
+
+  useEffect(() => {
+    const volume = effectiveWeaponVolume(audioVolumes);
+    gains.current.forEach((gain) => { gain.gain.value = volume; });
+  }, [audioVolumes]);
 
   const playShot = useCallback((id: WeaponId) => play(id), [play]);
   const playReload = useCallback(() => play('reload'), [play]);

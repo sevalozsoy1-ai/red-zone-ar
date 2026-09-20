@@ -87,6 +87,7 @@ export default function BattleScreen({
   const { width, height } = useWindowDimensions();
   const [status, setStatus] = useState<CameraStatus>({ state: 'requesting', message: t('cameraHint') });
   const [restartKey, setRestartKey] = useState(0);
+  const [fireSignal, setFireSignal] = useState(0);
   const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('back');
   const [visionMode, setVisionMode] = useState<VisionMode>('normal');
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
@@ -607,6 +608,10 @@ export default function BattleScreen({
     const hasMarkerPath = !!battleSession && !networkHitTest && markerId !== null;
     if (battleSession && hasMarkerPath && !tryAcquireBattleShot(shotInFlightRef)) return false;
     lastFireTimeRef.current = now;
+    // This is intentionally after all local fire guards. The camera component
+    // treats the torch as an optional visual aid and safely ignores unsupported
+    // hardware without affecting the shot/network path.
+    setFireSignal((current) => current + 1);
     if (!activeGoldRef.current && (w.id !== 'knife' || fireMode === 'throw')) {
       ammoRef.current -= 1;
       setAmmo(ammoRef.current);
@@ -870,6 +875,7 @@ export default function BattleScreen({
           <LiveBattleCamera
             onStatus={setStatus}
             restartKey={restartKey}
+            fireSignal={fireSignal}
             facing={cameraFacing}
             onFacingUnavailable={(failedFacing) => {
               if (failedFacing === 'back') {

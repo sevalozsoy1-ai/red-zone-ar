@@ -7,6 +7,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, Platform, type AppStateStatus, StyleSheet, View } from "react-native";
 
 import type { LiveBattleCameraProps } from "./camera-types";
+import {
+  canCommitTorchTimeout,
+  canPulseCameraTorch,
+  invalidateCameraTorch,
+  isPostMountFireSignal,
+} from "@/lib/camera-torch";
 import { useI18n } from "@/hooks/useI18n";
 import { cameraFacingLabel, uiText } from "@/lib/i18n";
 import {
@@ -41,6 +47,7 @@ export default function LiveBattleCamera({
   restartKey,
   facing,
   onFacingUnavailable,
+  fireSignal,
 }: LiveBattleCameraProps) {
   const { locale, t } = useI18n();
   const cameraRef = useRef<CameraView | null>(null);
@@ -63,9 +70,64 @@ export default function LiveBattleCamera({
   const [pictureSize, setPictureSize] = useState<string | undefined>();
   const pictureSizeConfiguredRef = useRef(false);
   const [appActive, setAppActive] = useState(AppState.currentState === "active");
+  const [torchEnabled, setTorchEnabled] = useState(false);
+  const torchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const torchGenerationRef = useRef(0);
+  const torchLifecycleRef = useRef({ generation: 0, enabled: false });
+  const lastFireSignalRef = useRef<number | undefined>(fireSignal);
 
   onFrameRef.current = onFrame;
   onStatusRef.current = onStatus;
+
+  const invalidateTorch = useCallback(() => {
+    if (torchTimerRef.current) clearTimeout(torchTimerRef.current);
+    torchTimerRef.current = null;
+    const next = invalidateCameraTorch(torchLifecycleRef.current);
+    torchLifecycleRef.current = next;
+    torchGenerationRef.current = next.generation;
+    setTorchEnabled(false);
+  }, []);
+
+  const pulseTorch = useCallback(() => {
+    // A torch is an optional camera capability, not a separate permission.
+    // Never let an unsupported HAL or a front-facing camera affect gameplay.
+    if (!canPulseCameraTorch({
+      platform: Platform.OS === "web" ? "web" : Platform.OS === "android" ? "android" : Platform.OS === "ios" ? "ios" : "other",
+      facing,
+      permissionGranted: !!permission?.granted,
+      mounted: mountedRef.current,
+    })) return;
+    try {
+      const generation = torchGenerationRef.current;
+      torchLifecycleRef.current = { generation, enabled: true };
+      setTorchEnabled(true);
+      if (torchTimerRef.current) clearTimeout(torchTimerRef.current);
+      torchTimerRef.current = setTimeout(() => {
+        if (!canCommitTorchTimeout(generation, torchLifecycleRef.current, mountedRef.current)) return;
+        try {
+          torchLifecycleRef.current = { generation, enabled: false };
+          setTorchEnabled(false);
+        } catch {
+          // Some camera HALs throw while changing torch state during teardown.
+        }
+      }, 90);
+    } catch {
+      setTorchEnabled(false);
+    }
+  }, [facing, permission?.granted]);
+
+  // Invalidate before processing the signal effect so a remount or camera
+  // switch cannot leave the previous CameraView torch state enabled.
+  useEffect(() => {
+    invalidateTorch();
+  }, [appActive, facing, permission?.granted, restartKey, invalidateTorch]);
+
+  useEffect(() => {
+    const previous = lastFireSignalRef.current;
+    lastFireSignalRef.current = fireSignal;
+    if (!isPostMountFireSignal(previous, fireSignal)) return;
+    pulseTorch();
+  }, [fireSignal, pulseTorch]);
 
   const requestCamera = useCallback(async () => {
     onStatusRef.current({ state: "requesting", message: `${t("cameraAccess")} · ${t("waiting")}` });
@@ -91,8 +153,9 @@ export default function LiveBattleCamera({
     }
     return () => {
       mountedRef.current = false;
+      invalidateTorch();
     };
-  }, [permission?.granted, requestCamera, restartKey]);
+  }, [permission?.granted, requestCamera, restartKey, invalidateTorch]);
 
   const capture = useCallback(async (): Promise<number | null> => {
     if (!onFrameRef.current) return null;
@@ -307,6 +370,7 @@ export default function LiveBattleCamera({
           // Expo Camera defaults to the rear camera, but keep this explicit so
           // the first launch prefers it while tablets can switch to selfie mode.
           facing={facing}
+          enableTorch={facing === "back" && torchEnabled}
           // 0 is the unzoomed native lens position. Digital zoom belongs only
           // to the battle scope animation, not to the camera preview.
           zoom={0}

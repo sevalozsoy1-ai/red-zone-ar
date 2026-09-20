@@ -14,6 +14,8 @@ import {
 } from '@/lib/audio-pool-coordinator';
 import { getWeapon, type WeaponId } from '@/lib/weapons';
 import { WEAPON_SOUNDS } from '@/lib/weapon-assets';
+import { useGame } from '@/context/GameContext';
+import { effectiveWeaponVolume } from '@/lib/audio-settings';
 
 type SoundKey = WeaponId | 'reload';
 type PlayerPool = {
@@ -38,6 +40,7 @@ export type WeaponAudio = {
 };
 
 export function useWeaponAudio(): WeaponAudio {
+  const { audioVolumes } = useGame();
   const [error, setError] = useState<string | null>(null);
   const pools = useRef<Partial<PlayerPools>>({});
   const lastPlayed = useRef<Partial<Record<SoundKey, number>>>({});
@@ -88,12 +91,14 @@ export function useWeaponAudio(): WeaponAudio {
     const players: AudioPlayer[] = [];
     try {
       for (let index = 0; index < poolSize; index += 1) {
-        players.push(createAudioPlayer(SOURCES[key], {
+        const player = createAudioPlayer(SOURCES[key], {
           // Keep short effects from deactivating the shared iOS audio session
           // as soon as one pooled player reaches its end.
           keepAudioSessionActive: true,
           downloadFirst: true,
-        }));
+        });
+        player.volume = effectiveWeaponVolume(audioVolumes);
+        players.push(player);
       }
     } catch {
       players.forEach((player) => {
@@ -119,7 +124,16 @@ export function useWeaponAudio(): WeaponAudio {
     // prevents a slow/failing preload from becoming an unhandled rejection.
     void ready.catch(() => undefined);
     return created;
-  }, []);
+  }, [audioVolumes, disposePool]);
+
+  useEffect(() => {
+    const volume = effectiveWeaponVolume(audioVolumes);
+    Object.values(pools.current).forEach((pool) => {
+      pool?.players.forEach((player) => {
+        player.volume = volume;
+      });
+    });
+  }, [audioVolumes]);
 
   useEffect(() => {
     mounted.current = true;

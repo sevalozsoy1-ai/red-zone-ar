@@ -5,6 +5,11 @@ import {
   assertAudioOutputAvailable,
   waitForRunningAudioContext,
 } from '@/lib/audio-readiness';
+import { useGame } from '@/context/GameContext';
+import {
+  effectiveEffectsVolume,
+  effectiveMusicVolume,
+} from '@/lib/audio-settings';
 
 const INTRO_SOURCE = require('../assets/audio/red-zone-menu-combat.mp3');
 const ACCENT_SOURCE = require('../assets/audio/red-zone-weapon-menu-accent.mp3');
@@ -32,12 +37,15 @@ export type MenuAudio = {
  * player as an unlock probe, which would race the first real weapon action.
  */
 export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
+  const { audioVolumes } = useGame();
   const [error, setError] = useState<string | null>(null);
   const context = useRef<AudioContext | null>(null);
   const buffers = useRef<Partial<Record<SoundKey, AudioBuffer>>>({});
   const loading = useRef<Partial<Record<SoundKey, Promise<void>>>>({});
   const introSource = useRef<AudioBufferSourceNode | null>(null);
   const accentSource = useRef<AudioBufferSourceNode | null>(null);
+  const introGain = useRef<GainNode | null>(null);
+  const accentGain = useRef<GainNode | null>(null);
   const resumeRequest = useRef<Promise<void> | null>(null);
   const introGeneration = useRef(0);
   const accentGeneration = useRef(0);
@@ -163,10 +171,11 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
         if (!buffer) throw new Error('Missing decoded menu intro');
         source.buffer = buffer;
         source.loop = true;
-        gain.gain.value = INTRO_VOLUME;
+        gain.gain.value = INTRO_VOLUME * effectiveMusicVolume(audioVolumes);
         source.connect(gain);
         gain.connect(audioContext.destination);
         introSource.current = source;
+        introGain.current = gain;
         source.onended = () => {
           if (introSource.current === source) introSource.current = null;
           source.disconnect();
@@ -181,7 +190,7 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
           setError('Menü müziği oynatılamadı. Tarayıcıda ilk dokunuşu deneyin.');
         }
       });
-  }, [ensureContext, loadBuffer, resumeAudio, stopSource]);
+  }, [audioVolumes, ensureContext, loadBuffer, resumeAudio, stopSource]);
 
   const playWeaponAccent = useCallback(() => {
     if (
@@ -214,10 +223,11 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
         const buffer = buffers.current.accent;
         if (!buffer) throw new Error('Missing decoded menu accent');
         source.buffer = buffer;
-        gain.gain.value = ACCENT_VOLUME;
+        gain.gain.value = ACCENT_VOLUME * effectiveEffectsVolume(audioVolumes);
         source.connect(gain);
         gain.connect(audioContext.destination);
         accentSource.current = source;
+        accentGain.current = gain;
         source.onended = () => {
           if (accentSource.current === source) accentSource.current = null;
           source.disconnect();
@@ -230,7 +240,12 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
           setError('Menü ses efekti oynatılamadı. Tarayıcıda ilk dokunuşu deneyin.');
         }
       });
-  }, [ensureContext, loadBuffer, resumeAudio, stopSource]);
+  }, [audioVolumes, ensureContext, loadBuffer, resumeAudio, stopSource]);
+
+  useEffect(() => {
+    if (introGain.current) introGain.current.gain.value = INTRO_VOLUME * effectiveMusicVolume(audioVolumes);
+    if (accentGain.current) accentGain.current.gain.value = ACCENT_VOLUME * effectiveEffectsVolume(audioVolumes);
+  }, [audioVolumes]);
 
   const activateAudio = useCallback(() => {
     activated.current = true;

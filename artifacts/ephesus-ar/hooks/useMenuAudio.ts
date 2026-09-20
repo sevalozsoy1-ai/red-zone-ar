@@ -8,6 +8,11 @@ import {
   ensureNativeAudioSession,
   suspendNativeAudioSession,
 } from '@/lib/native-audio-session';
+import { useGame } from '@/context/GameContext';
+import {
+  effectiveEffectsVolume,
+  effectiveMusicVolume,
+} from '@/lib/audio-settings';
 
 const INTRO_SOURCE = require('../assets/audio/red-zone-menu-combat.mp3');
 const ACCENT_SOURCE = require('../assets/audio/red-zone-weapon-menu-accent.mp3');
@@ -31,6 +36,7 @@ export type MenuAudio = {
  * already firing a weapon, so sharing either player/pool would race that tap.
  */
 export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
+  const { audioVolumes } = useGame();
   const [error, setError] = useState<string | null>(null);
   const introPlayer = useRef<AudioPlayer | null>(null);
   const accentPlayer = useRef<AudioPlayer | null>(null);
@@ -182,9 +188,9 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
         downloadFirst: true,
         keepAudioSessionActive: true,
       });
-      intro.volume = INTRO_VOLUME;
+      intro.volume = INTRO_VOLUME * effectiveMusicVolume(audioVolumes);
       intro.loop = true;
-      accent.volume = ACCENT_VOLUME;
+      accent.volume = ACCENT_VOLUME * effectiveEffectsVolume(audioVolumes);
       accent.loop = false;
       introPlayer.current = intro;
       accentPlayer.current = accent;
@@ -229,6 +235,11 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
       accentReady.current = null;
     };
   }, [startIntro, stopAccent, stopIntro]);
+
+  useEffect(() => {
+    if (introPlayer.current) introPlayer.current.volume = INTRO_VOLUME * effectiveMusicVolume(audioVolumes);
+    if (accentPlayer.current) accentPlayer.current.volume = ACCENT_VOLUME * effectiveEffectsVolume(audioVolumes);
+  }, [audioVolumes]);
 
   useEffect(() => {
     if (!enabled || !ready || !active.current) {

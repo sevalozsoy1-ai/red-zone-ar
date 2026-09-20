@@ -15,4 +15,5 @@ export type LiveBattleCameraProps = {
   restartKey: number;
   facing: "front" | "back";
   onFacingUnavailable?: (facing: "front" | "back") => void;
+  fireSignal?: number;
 };

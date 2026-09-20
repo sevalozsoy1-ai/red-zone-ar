@@ -49,6 +49,7 @@ import {
 import { canLeaveBoot, shouldApplyDevicePreferences } from '@/lib/startup-gate';
 import { rtlLayout } from '@/lib/rtl';
 import { useMenuAudio } from '@/hooks/useMenuAudio';
+import type { AudioVolumeKey } from '@/lib/audio-settings';
 
 type Screen = 'boot' | 'permissions' | 'briefing' | 'home' | 'camera' | 'multiplayer' | 'settings' | 'armory' | 'store';
 
@@ -68,10 +69,11 @@ function languageForGame(value: Locale): LanguageCode {
   return value as unknown as LanguageCode;
 }
 
-function HapticButton({ children, onPress, style, disabled = false, testID = 'action-button' }: { children: React.ReactNode; onPress: () => void; style?: any; disabled?: boolean; testID?: string }) {
+function HapticButton({ children, onPress, style, disabled = false, testID = 'action-button', accessibilityLabel }: { children: React.ReactNode; onPress: () => void; style?: any; disabled?: boolean; testID?: string; accessibilityLabel?: string }) {
   return (
     <Pressable
       testID={testID}
+      accessibilityLabel={accessibilityLabel}
       disabled={disabled}
       onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); onPress(); }}
       style={({ pressed }) => [style, pressed && styles.pressed, disabled && styles.disabled]}
@@ -255,7 +257,11 @@ function PermissionScreen({ onContinue }: { onContinue: () => void }) {
       <View style={styles.permissionTop}>
         <View style={[styles.eyebrow, { backgroundColor: colors.secondary }]}><View style={[styles.dot, { backgroundColor: colors.cyan }]} /><Text style={[styles.eyebrowText, { color: colors.cyan }]}>{t('setupStep')}</Text></View>
         <Text style={[styles.display, { color: colors.foreground }]}>{t('permissions')}</Text>
-        <Text style={[styles.body, { color: colors.mutedForeground }]}>{t('cameraHint')}</Text>
+        <Text style={[styles.body, { color: colors.mutedForeground }]}>
+          {t('cameraHint')} · {locale === 'tr'
+            ? 'Kamera gerekir; arka flaş varsa isteğe bağlı kullanılır.'
+            : 'Camera is required; the rear torch is optional when the device supports it.'}
+        </Text>
         <Text style={[styles.sectionLabel, { color: colors.amber, marginTop: 16 }]}>{t('language')}</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.permissionLanguages}>
           {SUPPORTED_LOCALES.map((item) => <HapticButton key={item} onPress={() => setLanguage(languageForGame(item))} style={[styles.languageChip, { backgroundColor: item === locale ? colors.cyan : colors.secondary }]}><Text style={[styles.languageChipText, { color: item === locale ? colors.ink : colors.mutedForeground }]}>{LOCALE_INFO[item].nativeName}</Text></HapticButton>)}
@@ -358,7 +364,14 @@ function ToolCard({ title, subtitle, icon, onPress }: { title: string; subtitle:
 
 function SettingsScreen({ onBack }: { onBack: () => void }) {
   const colors = useColors();
-  const { language, setLanguage, activeGold, goldExpiresAt } = useGame();
+  const {
+    language,
+    setLanguage,
+    activeGold,
+    goldExpiresAt,
+    audioVolumes,
+    setAudioVolumes,
+  } = useGame();
   const { t, locale, rtl } = useI18n();
   type Detail = 'about' | 'developer' | 'privacy' | 'security' | 'guide';
   const [detail, setDetail] = useState<Detail | null>(null);
@@ -385,6 +398,24 @@ function SettingsScreen({ onBack }: { onBack: () => void }) {
          <View style={[styles.settingsHero, { backgroundColor: colors.card, borderColor: colors.border }]}><View style={[styles.settingsOrb, { backgroundColor: colors.secondary }]}><MaterialCommunityIcons name="radar" size={34} color="#FF453A" /></View><View><Text style={[styles.settingsTitle, { color: colors.foreground }]}>{t('brand')}</Text><Text style={[styles.settingsSubtitle, { color: colors.mutedForeground }]}>v1.0</Text></View></View>
         <Text style={[styles.settingsSection, { color: colors.amber }]}>{t('system')}</Text>
          <View style={[styles.settingsGroup, { backgroundColor: colors.card, borderColor: colors.border }]}><SettingRow icon="globe" label={t('language')} trailing={<ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.languageRow}>{SUPPORTED_LOCALES.map((item) => <HapticButton key={item} onPress={() => setLanguage(languageForGame(item))} style={[styles.languageChip, { backgroundColor: locale === item ? colors.cyan : colors.secondary }]}><Text style={[styles.languageChipText, { color: locale === item ? colors.ink : colors.mutedForeground }]}>{LOCALE_INFO[item].nativeName}</Text></HapticButton>)}</ScrollView>} /></View>
+          <Text style={[styles.settingsSection, { color: colors.amber }]}>{locale === 'tr' ? 'SES MİKSERİ' : 'AUDIO MIXER'}</Text>
+          <View style={[styles.settingsGroup, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            {([
+              ['master', locale === 'tr' ? 'Genel ses' : 'Master volume', 'volume-2'],
+              ['music', locale === 'tr' ? 'Menü müziği' : 'Menu music', 'music'],
+              ['weapon', locale === 'tr' ? 'Silah sesleri' : 'Weapon sounds', 'target'],
+              ['effects', locale === 'tr' ? 'Efekt sesleri' : 'Effects', 'zap'],
+            ] as const).map(([key, label, icon]) => (
+              <AudioSettingRow
+                key={key}
+                settingKey={key}
+                label={label}
+                icon={icon}
+                value={audioVolumes[key]}
+                onChange={(value) => setAudioVolumes({ [key]: value })}
+              />
+            ))}
+          </View>
          <Text style={[styles.settingsSection, { color: colors.amber }]}>{t('gold')} · {t('simulationBadge')}</Text>
          <View style={[styles.goldSettingsCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
            <View style={[styles.goldSettingsIcon, { backgroundColor: colors.secondary }]}><Feather name="award" size={21} color={colors.amber} /></View>
@@ -438,6 +469,55 @@ function SettingsScreen({ onBack }: { onBack: () => void }) {
 function SettingRow({ icon, label, trailing, onPress }: { icon: keyof typeof Feather.glyphMap; label: string; trailing?: React.ReactNode; onPress?: () => void }) {
   const colors = useColors();
   return <HapticButton onPress={onPress ?? (() => undefined)} style={[styles.settingRow, { borderBottomColor: colors.border }]}><View style={[styles.settingIcon, { backgroundColor: colors.secondary }]}><Feather name={icon} size={17} color={colors.cyan} /></View><Text style={[styles.settingLabel, { color: colors.foreground }]}>{label}</Text>{trailing ?? <Feather name="chevron-right" size={18} color={colors.mutedForeground} />}</HapticButton>;
+}
+
+function AudioSettingRow({
+  settingKey,
+  label,
+  icon,
+  value,
+  onChange,
+}: {
+  settingKey: AudioVolumeKey;
+  label: string;
+  icon: keyof typeof Feather.glyphMap;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  const colors = useColors();
+  const percentage = Math.round(value * 100);
+  const adjust = (delta: number) => onChange(Math.min(1, Math.max(0, value + delta)));
+  return (
+    <View
+      accessible
+      accessibilityRole="adjustable"
+      accessibilityLabel={label}
+      accessibilityValue={{ min: 0, max: 100, now: percentage, text: `${percentage}%` }}
+      style={[styles.audioSettingRow, { borderBottomColor: colors.border }]}
+    >
+      <View style={[styles.settingIcon, { backgroundColor: colors.secondary }]}>
+        <Feather name={icon} size={17} color={colors.cyan} />
+      </View>
+      <Text style={[styles.settingLabel, { color: colors.foreground }]}>{label}</Text>
+      <HapticButton
+        testID={`audio-${settingKey}-down`}
+        accessibilityLabel={`${label} azalt`}
+        onPress={() => adjust(-0.1)}
+        style={[styles.audioAdjustButton, { borderColor: colors.border }]}
+      >
+        <Feather name="minus" size={16} color={colors.foreground} />
+      </HapticButton>
+      <Text style={[styles.audioPercentage, { color: colors.amber }]}>{percentage}%</Text>
+      <HapticButton
+        testID={`audio-${settingKey}-up`}
+        accessibilityLabel={`${label} artır`}
+        onPress={() => adjust(0.1)}
+        style={[styles.audioAdjustButton, { borderColor: colors.border }]}
+      >
+        <Feather name="plus" size={16} color={colors.foreground} />
+      </HapticButton>
+    </View>
+  );
 }
 
 function StoreScreen({ onBack }: { onBack: () => void }) {
@@ -745,6 +825,9 @@ const styles = StyleSheet.create({
   settingsSubtitle: { fontSize: 9, marginTop: 5, letterSpacing: 1 },
   settingsSection: { fontSize: 9, fontWeight: '700', letterSpacing: 1.7, marginTop: 27, marginBottom: 9 },
   settingsGroup: { borderWidth: 1, borderRadius: 15, overflow: 'hidden' },
+  audioSettingRow: { minHeight: 62, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, gap: 8 },
+  audioAdjustButton: { width: 32, height: 32, borderWidth: 1, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
+  audioPercentage: { width: 43, textAlign: 'center', fontSize: 12, fontWeight: '800' },
   goldSettingsCard: { borderWidth: 1, borderRadius: 15, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 9 },
   goldSettingsIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   goldSettingsCopy: { flex: 1, minWidth: 0 },
