@@ -48,6 +48,40 @@ export function updateMarkerLock(
   return state.lockedId !== null && now - state.lastSeenAt <= holdMs ? state.lockedId : null;
 }
 
+/**
+ * Damage authorization deliberately has no hold window. A retained UI lock
+ * can make aiming feel stable, but it must never damage an opponent that is
+ * absent from the newest analyzed camera frame.
+ */
+export function updateMarkerAuthorization(
+  state: MarkerLockState,
+  detectedId: number | null,
+  now: number,
+  options: { consecutiveFrames?: number } = {},
+): number | null {
+  const consecutiveFrames = options.consecutiveFrames ?? 2;
+  if (detectedId === null) {
+    state.candidateId = null;
+    state.candidateCount = 0;
+    state.lockedId = null;
+    state.lastSeenAt = 0;
+    return null;
+  }
+
+  if (state.candidateId !== detectedId) {
+    state.candidateId = detectedId;
+    state.candidateCount = 1;
+    state.lockedId = null;
+    state.lastSeenAt = now;
+    return consecutiveFrames <= 1 ? detectedId : null;
+  }
+
+  state.candidateCount += 1;
+  state.lastSeenAt = now;
+  if (state.candidateCount >= consecutiveFrames) state.lockedId = detectedId;
+  return state.lockedId;
+}
+
 function rgb(hex: string) {
   const value = hex.replace("#", "");
   return {
