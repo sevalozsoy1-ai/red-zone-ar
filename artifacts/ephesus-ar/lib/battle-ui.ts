@@ -118,3 +118,21 @@ export function getNetworkTarget(
     reason: null,
   };
 }
+
+/**
+ * Camera confirmation is independent from the presence lease. If the camera
+ * can currently see an alive opponent's room marker, a delayed heartbeat must
+ * not turn that physical observation into a miss.
+ */
+export function getMarkerTarget(
+  players: BattleTargetCandidate[] | undefined,
+  ownPlayerId: string | undefined,
+  markerId: number | null,
+): BattleTargetCandidate | null {
+  if (markerId === null) return null;
+  return (players ?? []).find((player) =>
+    player.id !== ownPlayerId
+    && player.alive
+    && player.markerId === markerId
+  ) ?? null;
+}
