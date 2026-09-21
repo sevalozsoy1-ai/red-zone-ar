@@ -13,6 +13,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   useWindowDimensions,
   View,
@@ -371,6 +372,9 @@ function SettingsScreen({ onBack }: { onBack: () => void }) {
     goldExpiresAt,
     audioVolumes,
     setAudioVolumes,
+    musicEnabled,
+    flashlightEnabled,
+    setAudioPreferences,
   } = useGame();
   const { t, locale, rtl } = useI18n();
   type Detail = 'about' | 'developer' | 'privacy' | 'security' | 'guide';
@@ -398,13 +402,13 @@ function SettingsScreen({ onBack }: { onBack: () => void }) {
          <View style={[styles.settingsHero, { backgroundColor: colors.card, borderColor: colors.border }]}><View style={[styles.settingsOrb, { backgroundColor: colors.secondary }]}><MaterialCommunityIcons name="radar" size={34} color="#FF453A" /></View><View><Text style={[styles.settingsTitle, { color: colors.foreground }]}>{t('brand')}</Text><Text style={[styles.settingsSubtitle, { color: colors.mutedForeground }]}>v1.0</Text></View></View>
         <Text style={[styles.settingsSection, { color: colors.amber }]}>{t('system')}</Text>
          <View style={[styles.settingsGroup, { backgroundColor: colors.card, borderColor: colors.border }]}><SettingRow icon="globe" label={t('language')} trailing={<ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.languageRow}>{SUPPORTED_LOCALES.map((item) => <HapticButton key={item} onPress={() => setLanguage(languageForGame(item))} style={[styles.languageChip, { backgroundColor: locale === item ? colors.cyan : colors.secondary }]}><Text style={[styles.languageChipText, { color: locale === item ? colors.ink : colors.mutedForeground }]}>{LOCALE_INFO[item].nativeName}</Text></HapticButton>)}</ScrollView>} /></View>
-          <Text style={[styles.settingsSection, { color: colors.amber }]}>{locale === 'tr' ? 'SES MİKSERİ' : 'AUDIO MIXER'}</Text>
+           <Text style={[styles.settingsSection, { color: colors.amber }]}>{t('audioMixer')}</Text>
           <View style={[styles.settingsGroup, { backgroundColor: colors.card, borderColor: colors.border }]}>
             {([
-              ['master', locale === 'tr' ? 'Genel ses' : 'Master volume', 'volume-2'],
-              ['music', locale === 'tr' ? 'Menü müziği' : 'Menu music', 'music'],
-              ['weapon', locale === 'tr' ? 'Silah sesleri' : 'Weapon sounds', 'target'],
-              ['effects', locale === 'tr' ? 'Efekt sesleri' : 'Effects', 'zap'],
+               ['master', t('masterVolume'), 'volume-2'],
+               ['music', t('musicVolume'), 'music'],
+               ['weapon', t('weaponVolume'), 'target'],
+               ['effects', t('effectsVolume'), 'zap'],
             ] as const).map(([key, label, icon]) => (
               <AudioSettingRow
                 key={key}
@@ -415,6 +419,20 @@ function SettingsScreen({ onBack }: { onBack: () => void }) {
                 onChange={(value) => setAudioVolumes({ [key]: value })}
               />
             ))}
+             <PreferenceToggle
+               testID="settings-music-toggle"
+               icon="music"
+               label={musicEnabled ? t('musicOn') : t('musicOff')}
+               value={musicEnabled}
+               onValueChange={(value) => setAudioPreferences({ musicEnabled: value })}
+             />
+             <PreferenceToggle
+               testID="settings-flashlight-toggle"
+               icon="zap"
+               label={flashlightEnabled ? t('flashlightOn') : t('flashlightOff')}
+               value={flashlightEnabled}
+               onValueChange={(value) => setAudioPreferences({ flashlightEnabled: value })}
+             />
           </View>
          <Text style={[styles.settingsSection, { color: colors.amber }]}>{t('gold')} · {t('simulationBadge')}</Text>
          <View style={[styles.goldSettingsCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -520,6 +538,39 @@ function AudioSettingRow({
   );
 }
 
+function PreferenceToggle({
+  testID,
+  icon,
+  label,
+  value,
+  onValueChange,
+}: {
+  testID: string;
+  icon: keyof typeof Feather.glyphMap;
+  label: string;
+  value: boolean;
+  onValueChange: (value: boolean) => void;
+}) {
+  const colors = useColors();
+  return (
+    <View style={[styles.settingRow, { borderBottomColor: colors.border }]}>
+      <View style={[styles.settingIcon, { backgroundColor: colors.secondary }]}>
+        <Feather name={icon} size={17} color={colors.cyan} />
+      </View>
+      <Text style={[styles.settingLabel, { color: colors.foreground }]}>{label}</Text>
+      <Switch
+        testID={testID}
+        accessibilityRole="switch"
+        accessibilityLabel={label}
+        value={value}
+        onValueChange={onValueChange}
+        trackColor={{ false: colors.border, true: colors.cyan }}
+        thumbColor={value ? colors.ink : colors.mutedForeground}
+      />
+    </View>
+  );
+}
+
 function StoreScreen({ onBack }: { onBack: () => void }) {
   const colors = useColors();
   const { locale, t, rtl } = useI18n();
@@ -571,7 +622,9 @@ export default function Index() {
   const [soloGateVisible, setSoloGateVisible] = useState(false);
   // Menu audio has its own intro/effect players. It is active for boot and all
   // menu screens, but turns off before BattleScreen mounts.
-  const menuAudio = useMenuAudio({ enabled: screen !== 'camera', ready });
+  // Keep ambience alive while the camera and multiplayer battle are open;
+  // the user's music preference, not navigation, controls playback.
+  const menuAudio = useMenuAudio({ enabled: screen !== 'permissions', ready });
   const [devicePreferencesApplied, setDevicePreferencesApplied] = useState(false);
   const setLanguageRef = useRef(setLanguage);
   const setCountryRef = useRef(setCountry);

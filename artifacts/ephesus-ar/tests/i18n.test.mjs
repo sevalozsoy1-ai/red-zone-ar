@@ -43,3 +43,52 @@ test('winner terminal copy is localized for every supported locale', () => {
     assert.ok(uiText(locale, 'winner').trim(), `${locale} winner copy must not be empty`);
   }
 });
+
+test('multiplayer consent and target-material copy exists for every supported locale', () => {
+  const keys = [
+    'battleConsent', 'consentRequired', 'cameraPermissionRequest',
+    'cameraPermissionOpenSettings', 'assignedPlayer', 'stickerInstructions',
+    'designRange', 'hitTolerance', 'networkContinuity', 'matchJoinQr',
+    'scanJoinQr', 'manualCodeFallback', 'targetPdf', 'viewPdf', 'printPdf',
+    'sharePdf', 'sharingUnavailable', 'sharingFailed', 'printingFailed',
+    'scanJoinQrHint', 'invalidJoinQr',
+    'tutorialTitle', 'tutorialStep1', 'tutorialStep2', 'tutorialStep3',
+    'tutorialStep4', 'tutorialCameraWarning', 'tutorialSkip', 'tutorialNext',
+    'tutorialBack', 'tutorialDone', 'howToPrepare',
+  ];
+  for (const locale of SUPPORTED_LOCALES) {
+    for (const key of keys) {
+      assert.ok(uiText(locale, key).trim(), `${locale} ${key} copy must not be empty`);
+    }
+  }
+});
+
+test('target setup tutorial copy is native and complete for every locale', () => {
+  const keys = [
+    'tutorialTitle', 'tutorialStep1', 'tutorialStep2', 'tutorialStep3',
+    'tutorialStep4', 'tutorialCameraWarning', 'tutorialSkip', 'tutorialNext',
+    'tutorialBack', 'tutorialDone', 'howToPrepare',
+  ];
+  const english = keys.map((key) => uiText('en', key));
+  for (const locale of SUPPORTED_LOCALES) {
+    for (const [index, key] of keys.entries()) {
+      const value = uiText(locale, key).trim();
+      assert.ok(value, `${locale} ${key} copy must not be empty`);
+      if (locale !== 'en') assert.notEqual(value, english[index], `${locale} ${key} must be translated`);
+    }
+  }
+});
+
+test('audio mixer and hybrid target HUD copy exists for every supported locale', () => {
+  const keys = [
+    'audioMixer', 'masterVolume', 'musicVolume', 'weaponVolume', 'effectsVolume',
+    'musicOn', 'musicOff', 'flashlightOn', 'flashlightOff', 'flashlightUnsupported',
+    'qrFreshTarget', 'qrRetainedLock', 'qrAutomaticTarget', 'qrNoTarget',
+    'qrClearTarget', 'qrSwitchTarget', 'qrTargetHelp',
+  ];
+  for (const locale of SUPPORTED_LOCALES) {
+    for (const key of keys) {
+      assert.ok(TRANSLATIONS[locale][key].trim(), `${locale} ${key} copy must not be empty`);
+    }
+  }
+});

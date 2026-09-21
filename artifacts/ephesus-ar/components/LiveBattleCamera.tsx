@@ -43,11 +43,13 @@ function base64ToBytes(base64: string): Uint8Array {
 
 export default function LiveBattleCamera({
   onFrame,
+  onBarcodeScanned,
   onStatus,
   restartKey,
   facing,
   onFacingUnavailable,
   fireSignal,
+  flashlightEnabled = true,
 }: LiveBattleCameraProps) {
   const { locale, t } = useI18n();
   const cameraRef = useRef<CameraView | null>(null);
@@ -88,10 +90,14 @@ export default function LiveBattleCamera({
     setTorchEnabled(false);
   }, []);
 
+  useEffect(() => {
+    if (!flashlightEnabled) invalidateTorch();
+  }, [flashlightEnabled, invalidateTorch]);
+
   const pulseTorch = useCallback(() => {
     // A torch is an optional camera capability, not a separate permission.
     // Never let an unsupported HAL or a front-facing camera affect gameplay.
-    if (!canPulseCameraTorch({
+    if (!flashlightEnabled || !canPulseCameraTorch({
       platform: Platform.OS === "web" ? "web" : Platform.OS === "android" ? "android" : Platform.OS === "ios" ? "ios" : "other",
       facing,
       permissionGranted: !!permission?.granted,
@@ -114,7 +120,7 @@ export default function LiveBattleCamera({
     } catch {
       setTorchEnabled(false);
     }
-  }, [facing, permission?.granted]);
+  }, [facing, flashlightEnabled, permission?.granted]);
 
   // Invalidate before processing the signal effect so a remount or camera
   // switch cannot leave the previous CameraView torch state enabled.
@@ -378,6 +384,8 @@ export default function LiveBattleCamera({
            // only after layout/readiness and never changes with the profile.
           autofocus={Platform.OS === "android" ? "on" : "off"}
            pictureSize={pictureSize}
+          barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+          onBarcodeScanned={onBarcodeScanned}
           animateShutter={false}
           onCameraReady={() => {
             const generation = generationRef.current;

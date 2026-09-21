@@ -36,7 +36,7 @@ export type MenuAudio = {
  * already firing a weapon, so sharing either player/pool would race that tap.
  */
 export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
-  const { audioVolumes } = useGame();
+  const { audioVolumes, musicEnabled } = useGame();
   const [error, setError] = useState<string | null>(null);
   const introPlayer = useRef<AudioPlayer | null>(null);
   const accentPlayer = useRef<AudioPlayer | null>(null);
@@ -47,6 +47,7 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
   );
   const mounted = useRef(true);
   const enabledRef = useRef(enabled);
+  const musicEnabledRef = useRef(musicEnabled);
   const readyRef = useRef(ready);
   const introStartQueued = useRef(false);
   const accentStartQueued = useRef(false);
@@ -55,6 +56,7 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
   const lastAccentAt = useRef(0);
 
   enabledRef.current = enabled;
+  musicEnabledRef.current = musicEnabled;
   readyRef.current = ready;
 
   const stopIntro = useCallback(() => {
@@ -90,6 +92,7 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
       !mounted.current
       || !active.current
       || !enabledRef.current
+      || !musicEnabledRef.current
       || !readyRef.current
       || introStartQueued.current
     ) return;
@@ -106,6 +109,7 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
           !mounted.current
           || !active.current
           || !enabledRef.current
+            || !musicEnabledRef.current
           || !readyRef.current
           || generation !== introGeneration.current
           || !player.isLoaded
@@ -156,6 +160,7 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
             mounted.current
             && active.current
             && enabledRef.current
+            && musicEnabledRef.current
             && readyRef.current
             && generation === accentGeneration.current
           ) {
@@ -243,19 +248,19 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
 
   useEffect(() => {
     if (!enabled || !ready || !active.current) {
-      if (!enabled) {
+      if (!enabled || !musicEnabled) {
         stopIntro();
         stopAccent();
       }
       return;
     }
     startIntro();
-  }, [enabled, ready, startIntro, stopAccent, stopIntro]);
+  }, [enabled, musicEnabled, ready, startIntro, stopAccent, stopIntro]);
 
   const startMusic = useCallback(() => {
     // Keep loaded-player playback in the user's gesture for browser autoplay.
     const player = introPlayer.current;
-    if (player?.isLoaded && enabledRef.current && active.current) {
+    if (player?.isLoaded && enabledRef.current && musicEnabledRef.current && active.current) {
       player.play();
     } else {
       startIntro();

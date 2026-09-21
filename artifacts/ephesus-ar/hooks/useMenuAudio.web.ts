@@ -37,7 +37,7 @@ export type MenuAudio = {
  * player as an unlock probe, which would race the first real weapon action.
  */
 export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
-  const { audioVolumes } = useGame();
+  const { audioVolumes, musicEnabled } = useGame();
   const [error, setError] = useState<string | null>(null);
   const context = useRef<AudioContext | null>(null);
   const buffers = useRef<Partial<Record<SoundKey, AudioBuffer>>>({});
@@ -55,9 +55,11 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
   const mounted = useRef(true);
   const enabledRef = useRef(enabled);
   const readyRef = useRef(ready);
+  const musicEnabledRef = useRef(musicEnabled);
 
   enabledRef.current = enabled;
   readyRef.current = ready;
+  musicEnabledRef.current = musicEnabled;
 
   const stopSource = useCallback((sourceRef: { current: AudioBufferSourceNode | null }) => {
     const source = sourceRef.current;
@@ -141,6 +143,7 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
       !mounted.current
       || !activated.current
       || !enabledRef.current
+      || !musicEnabledRef.current
       || !readyRef.current
       || document.hidden
     ) return;
@@ -159,6 +162,7 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
         if (
           !mounted.current
           || !enabledRef.current
+          || !musicEnabledRef.current
           || !readyRef.current
           || document.hidden
           || generation !== introGeneration.current
@@ -197,6 +201,7 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
       !mounted.current
       || !activated.current
       || !enabledRef.current
+      || !musicEnabledRef.current
       || !readyRef.current
       || document.hidden
     ) return;
@@ -212,6 +217,7 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
         if (
           !mounted.current
           || !enabledRef.current
+          || !musicEnabledRef.current
           || !readyRef.current
           || document.hidden
           || generation !== accentGeneration.current
@@ -251,7 +257,7 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
     activated.current = true;
     void resumeAudio()
       .then(() => {
-        if (enabledRef.current && readyRef.current && !document.hidden) startIntro();
+        if (enabledRef.current && musicEnabledRef.current && readyRef.current && !document.hidden) startIntro();
       })
       .catch(() => {
         if (mounted.current) {
@@ -297,15 +303,15 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
   }, [activateAudio, stopAccent, stopIntro]);
 
   useEffect(() => {
-    if (!enabled || !ready || !activated.current || document.hidden) {
-      if (!enabled) {
+    if (!enabled || !ready || !musicEnabled || !activated.current || document.hidden) {
+      if (!enabled || !musicEnabled) {
         stopIntro();
         stopAccent();
       }
       return;
     }
     startIntro();
-  }, [enabled, ready, startIntro, stopAccent, stopIntro]);
+  }, [enabled, musicEnabled, ready, startIntro, stopAccent, stopIntro]);
 
   return { playWeaponAccent, error };
 }

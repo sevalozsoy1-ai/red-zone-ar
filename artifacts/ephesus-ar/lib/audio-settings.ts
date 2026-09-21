@@ -1,5 +1,15 @@
 export type AudioVolumeKey = 'master' | 'music' | 'weapon' | 'effects';
 
+export type AudioPreferences = {
+  musicEnabled: boolean;
+  flashlightEnabled: boolean;
+};
+
+export const DEFAULT_AUDIO_PREFERENCES: AudioPreferences = {
+  musicEnabled: true,
+  flashlightEnabled: true,
+};
+
 export type AudioVolumes = {
   master: number;
   music: number;
@@ -26,6 +36,19 @@ export function normalizeAudioVolumes(value: unknown): AudioVolumes {
     music: normalizeAudioVolume(candidate.music),
     weapon: normalizeAudioVolume(candidate.weapon),
     effects: normalizeAudioVolume(candidate.effects),
+  };
+}
+
+export function normalizeAudioPreference(value: unknown, fallback = true): boolean {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+export function normalizeAudioPreferences(value: unknown): AudioPreferences {
+  if (!value || typeof value !== 'object') return DEFAULT_AUDIO_PREFERENCES;
+  const candidate = value as Partial<AudioPreferences>;
+  return {
+    musicEnabled: normalizeAudioPreference(candidate.musicEnabled),
+    flashlightEnabled: normalizeAudioPreference(candidate.flashlightEnabled),
   };
 }
 

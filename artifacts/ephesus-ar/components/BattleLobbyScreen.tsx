@@ -1,5 +1,10 @@
 import { Feather } from "@expo/vector-icons";
+import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Crypto from "expo-crypto";
+import { Asset } from "expo-asset";
+import * as Print from "expo-print";
+import * as Sharing from "expo-sharing";
+import QRCode from "react-native-qrcode-svg";
 import {
   getHealthCheckQueryKey,
   type BattleSession,
@@ -12,7 +17,7 @@ import {
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Alert, AppState, BackHandler, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, AppState, BackHandler, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { useColors } from "@/hooks/useColors";
@@ -24,8 +29,44 @@ import { retryBattleEntry } from "@/lib/battle-entry-retry";
 import { setBattleSessionToken } from "@/lib/battle-auth";
 import { battleSessionCopy } from "@/lib/battle-session-copy";
 import { handleBattleAppStateChange, handleBattleHardwareBack } from "@/lib/battle-session-lifecycle";
+import { parseRoomJoinPayload, roomJoinPayload } from "@/lib/qr-target";
 import PlayerMarker from "./PlayerMarker";
 import EconomyGate from "./EconomyGate";
+import TargetSetupTutorial from "./TargetSetupTutorial";
+import { hasSeenTargetTutorial, setTargetTutorialSeen } from "@/lib/tutorial-state";
+
+async function targetPdfUri(): Promise<string | null> {
+  try {
+    const asset = Asset.fromModule(require("../assets/red-zone-ar-target-tags.pdf"));
+    await asset.downloadAsync();
+    return asset.localUri ?? asset.uri ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function printTargetPdf(): Promise<boolean> {
+  const uri = await targetPdfUri();
+  if (!uri) return false;
+  try {
+    await Print.printAsync({ uri });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function shareTargetPdf(): Promise<"ok" | "unavailable" | "failed"> {
+  if (Platform.OS === "web" || !(await Sharing.isAvailableAsync())) return "unavailable";
+  const uri = await targetPdfUri();
+  if (!uri) return "failed";
+  try {
+    await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: "Red Zone AR" });
+    return "ok";
+  } catch {
+    return "failed";
+  }
+}
 
 function formatLobbyError(error: unknown, t: (key: any) => string) {
   const payload =
@@ -248,8 +289,8 @@ export default function BattleLobbyScreen({ onBack, onStart }: { onBack: () => v
             <Pressable testID="start-deathmatch-btn" disabled={busy} onPress={() => start.mutate({ code: room.code })} style={[styles.primary, { backgroundColor: colors.cyan }, busy && styles.disabled]}>
                {busy ? <ActivityIndicator color={colors.ink} /> : <><Text style={[styles.primaryText, { color: colors.ink }]}>{t("teamBattle")}</Text><Feather name="play" size={20} color={colors.ink} /></>}
            </Pressable>
-           ) : <View style={[styles.waiting, { borderColor: colors.border }]}><ActivityIndicator color={colors.cyan} /><Text style={[styles.helper, { color: colors.mutedForeground }]}>{uiText(locale, "waitingHost")}</Text></View>}
-        </ScrollView>
+            ) : <View style={[styles.waiting, { borderColor: colors.border }]}><ActivityIndicator color={colors.cyan} /><Text style={[styles.helper, { color: colors.mutedForeground }]}>{uiText(locale, "waitingHost")}</Text></View>}
+         </ScrollView>
       </View>
     );
   }
@@ -276,8 +317,8 @@ export default function BattleLobbyScreen({ onBack, onStart }: { onBack: () => v
           {create.isPending ? <ActivityIndicator color={colors.ink} /> : <><Text style={[styles.primaryText, { color: colors.ink }]}>{uiText(locale, "createRoom")}</Text><Feather name="plus" size={20} color={colors.ink} /></>}
         </Pressable>
         <View style={styles.or}><View style={[styles.line, { backgroundColor: colors.border }]} /><Text style={[styles.label, { color: colors.mutedForeground }]}>{t("continue")}</Text><View style={[styles.line, { backgroundColor: colors.border }]} /></View>
-        <Text style={[styles.sectionTitle, { color: colors.cyan }]}>{uiText(locale, "joinRoom")}</Text>
-        <Text style={[styles.sectionHint, { color: colors.mutedForeground }]}>{uiText(locale, "roomJoinHint")}</Text>
+         <Text style={[styles.sectionTitle, { color: colors.cyan }]}>{uiText(locale, "joinRoom")}</Text>
+         <Text style={[styles.sectionHint, { color: colors.mutedForeground }]}>{uiText(locale, "roomJoinHint")}</Text>
         <TextInput testID="room-code-input" value={code} onChangeText={(value) => { setCode(value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase()); setMessage(""); }} maxLength={6} autoCapitalize="characters" autoCorrect={false} placeholder={uiText(locale, "roomCode")} placeholderTextColor={colors.mutedForeground} style={[styles.input, styles.codeInput, { color: colors.cyan, borderColor: colors.border, backgroundColor: colors.card }]} />
         <Pressable testID="join-room-btn" disabled={busy || !name.trim() || code.length !== 6} onPress={handleJoin} style={[styles.secondary, { borderColor: colors.cyan }, (busy || !name.trim() || code.length !== 6) && styles.disabled]}>
           {join.isPending ? <ActivityIndicator color={colors.cyan} /> : <Text style={[styles.primaryText, { color: colors.cyan }]}>{uiText(locale, "joinRoom")}</Text>}
@@ -342,7 +383,12 @@ export default function BattleLobbyScreen({
   const [entryIntent, setEntryIntent] = useState<"create" | "join" | null>(null);
   const [entryMatchId, setEntryMatchId] = useState<string | undefined>();
   const [entryDraft, setEntryDraft] = useState<{ name: string; code?: string; requestId: string } | null>(null);
+  const [tutorialVisible, setTutorialVisible] = useState(false);
+  const tutorialCheckedRef = useRef<string | null>(null);
   const [entryRetryStatus, setEntryRetryStatus] = useState("");
+  const [qrConsent, setQrConsent] = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [joinScannerVisible, setJoinScannerVisible] = useState(false);
   const [appActive, setAppActive] = useState(AppState.currentState === "active");
   const [sessionExpired, setSessionExpired] = useState(false);
   const appActiveRef = useRef(appActive);
@@ -383,6 +429,28 @@ export default function BattleLobbyScreen({
   });
   const room = roomQuery.data?.room ?? session?.room;
   const ownPlayer = room?.players.find((player) => player.id === session?.playerId);
+
+  const handleTutorialClose = useCallback(() => {
+    setTutorialVisible(false);
+    void setTargetTutorialSeen();
+  }, []);
+
+  useEffect(() => {
+    const sessionIdentity = session?.sessionToken ?? null;
+    if (!sessionIdentity) {
+      tutorialCheckedRef.current = null;
+      return;
+    }
+    if (!room || !ownPlayer || tutorialCheckedRef.current === sessionIdentity) return;
+    tutorialCheckedRef.current = sessionIdentity;
+    let active = true;
+    void hasSeenTargetTutorial().then((seen) => {
+      if (active && mountedRef.current && !seen) setTutorialVisible(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, [ownPlayer, room, session?.sessionToken]);
 
   const handleSessionExpired = useCallback(() => {
     if (sessionExpiredRef.current) return;
@@ -514,13 +582,54 @@ export default function BattleLobbyScreen({
     return () => subscription.remove();
   }, [requestHardwareBack]);
 
-  const handleCreate = () => {
+  const ensureCameraPermission = async () => {
+    if (cameraPermission?.granted) return true;
+    if (cameraPermission?.canAskAgain !== false) {
+      const result = await requestCameraPermission();
+      if (result.granted) return true;
+    }
+    Alert.alert(
+      uiText(locale, "cameraPermissionRequest"),
+      uiText(locale, "cameraPermissionOpenSettings"),
+      [
+        { text: t("close"), style: "cancel" },
+        { text: t("settings"), onPress: () => void Linking.openSettings() },
+      ],
+    );
+    return false;
+  };
+
+  const handleJoinQr = (data: string) => {
+    const roomCode = parseRoomJoinPayload(data);
+    if (!roomCode) return;
+    setCode(roomCode);
+    setJoinScannerVisible(false);
+    setMessage("");
+  };
+
+  const handlePdf = async (action: "print" | "share") => {
+    const result = action === "print" ? await printTargetPdf() : await shareTargetPdf();
+    if (result === false) {
+      Alert.alert(uiText(locale, "targetPdf"), uiText(locale, "printingFailed"));
+    } else if (result === "unavailable") {
+      Alert.alert(uiText(locale, "targetPdf"), uiText(locale, "sharingUnavailable"));
+    } else if (result === "failed") {
+      Alert.alert(uiText(locale, "targetPdf"), uiText(locale, "sharingFailed"));
+    }
+  };
+
+  const handleCreate = async () => {
     if (!appActiveRef.current) return;
     if (entryInFlightRef.current) return;
     entryGenerationRef.current += 1;
     const playerName = name.trim();
     setMessage("");
     setEntryRetryStatus("");
+    if (!qrConsent) {
+      setMessage(uiText(locale, "consentRequired"));
+      return;
+    }
+    if (!(await ensureCameraPermission())) return;
     if (!playerName) {
       setMessage(t("errorMessage"));
       return;
@@ -533,7 +642,7 @@ export default function BattleLobbyScreen({
     setEntryIntent("create");
   };
 
-  const handleJoin = () => {
+  const handleJoin = async () => {
     if (!appActiveRef.current) return;
     if (entryInFlightRef.current) return;
     entryGenerationRef.current += 1;
@@ -541,6 +650,11 @@ export default function BattleLobbyScreen({
     const roomCode = code.trim().toUpperCase();
     setMessage("");
     setEntryRetryStatus("");
+    if (!qrConsent) {
+      setMessage(uiText(locale, "consentRequired"));
+      return;
+    }
+    if (!(await ensureCameraPermission())) return;
     if (!playerName) {
       setMessage(t("errorMessage"));
       return;
@@ -571,8 +685,28 @@ export default function BattleLobbyScreen({
         <ScrollView contentContainerStyle={[styles.lobbyContent, { paddingBottom: insets.bottom + 50 }]}>
             <View style={[styles.markerCard, { backgroundColor: colors.card, borderColor: ownPlayer.markerColor }]}>
             <PlayerMarker color={ownPlayer.markerColor} markerId={ownPlayer.markerId} />
-             <View style={{ flex: 1 }}><Text style={[styles.markerTitle, { color: colors.foreground }]}>{uiText(locale, "playerMarker")}</Text><Text style={[styles.helper, { color: colors.mutedForeground }]}>{uiText(locale, "markerHint")}</Text></View>
+             <View style={{ flex: 1 }}><Text style={[styles.markerTitle, { color: colors.foreground }]}>{uiText(locale, "assignedPlayer")} · {ownPlayer.markerId + 1}</Text><Text style={[styles.helper, { color: colors.mutedForeground }]}>{uiText(locale, "stickerInstructions")} {uiText(locale, "designRange")}</Text></View>
           </View>
+           <View style={[styles.connectionCard, { borderColor: colors.cyan, backgroundColor: colors.card }]}>
+             <Text style={[styles.connectionText, { color: colors.foreground }]}>{uiText(locale, "networkContinuity")}</Text>
+             <Text style={[styles.helper, { color: colors.mutedForeground }]}>{uiText(locale, "hitTolerance")}</Text>
+           </View>
+           {ownPlayer.isHost ? (
+             <View style={[styles.qrCard, { borderColor: colors.cyan, backgroundColor: colors.card }]}>
+               <Text style={[styles.sectionTitle, { color: colors.cyan, marginTop: 0 }]}>{uiText(locale, "matchJoinQr")}</Text>
+               <QRCode value={roomJoinPayload(room.code)} size={150} backgroundColor={colors.card} color={colors.foreground} />
+               <Text style={[styles.helper, { color: colors.mutedForeground }]}>{uiText(locale, "scanJoinQrHint")}</Text>
+             </View>
+           ) : null}
+           <View style={[styles.pdfCard, { borderColor: colors.border, backgroundColor: colors.card }]}>
+             <Text style={[styles.sectionTitle, { color: colors.cyan, marginTop: 0 }]}>{uiText(locale, "targetPdf")}</Text>
+             <View style={styles.pdfButtons}>
+               <Pressable testID="target-pdf-view-btn" onPress={() => void handlePdf("print")} style={[styles.pdfButton, { borderColor: colors.cyan }]}><Text style={[styles.retryText, { color: colors.cyan }]}>{uiText(locale, "viewPdf")}</Text></Pressable>
+               <Pressable testID="target-pdf-print-btn" onPress={() => void handlePdf("print")} style={[styles.pdfButton, { borderColor: colors.cyan }]}><Text style={[styles.retryText, { color: colors.cyan }]}>{uiText(locale, "printPdf")}</Text></Pressable>
+               <Pressable testID="target-pdf-share-btn" onPress={() => void handlePdf("share")} style={[styles.pdfButton, { borderColor: colors.cyan }]}><Text style={[styles.retryText, { color: colors.cyan }]}>{uiText(locale, "sharePdf")}</Text></Pressable>
+             </View>
+              <Pressable testID="target-tutorial-btn" accessibilityRole="button" accessibilityLabel={uiText(locale, "howToPrepare")} onPress={() => setTutorialVisible(true)} style={[styles.tutorialTrigger, { backgroundColor: colors.cyan }]}><Feather name="help-circle" size={14} color={colors.ink} /><Text style={[styles.tutorialTriggerText, { color: colors.ink }]}>{uiText(locale, "howToPrepare")}</Text></Pressable>
+           </View>
           {roomError ? (
             <View style={[styles.connectionCard, { borderColor: colors.signal, backgroundColor: colors.card }]}>
               <Text style={[styles.connectionText, { color: colors.signal }]}>{roomError}</Text>
@@ -602,15 +736,20 @@ export default function BattleLobbyScreen({
                </Pressable>
              </View>
            ) : null}
-          {ownPlayer.isHost ? (
-            <Pressable testID="start-battle-btn" disabled={busy || !appActive} onPress={() => {
+           {ownPlayer.isHost ? (
+             <Pressable testID="start-battle-btn" disabled={busy || !appActive} onPress={() => {
               if (!appActiveRef.current) return;
               start.mutate({ code: room.code } as Parameters<typeof start.mutate>[0]);
             }} style={[styles.primary, { backgroundColor: colors.cyan }, (!appActive || busy) && styles.disabled]}>
                {busy ? <ActivityIndicator color={colors.ink} /> : <><Text style={[styles.primaryText, { color: colors.ink }]}>{t("teamBattle")}</Text><Feather name="play" size={20} color={colors.ink} /></>}
            </Pressable>
-           ) : <View style={[styles.waiting, { borderColor: colors.border }]}><ActivityIndicator color={colors.cyan} /><Text style={[styles.helper, { color: colors.mutedForeground }]}>{uiText(locale, "waitingHost")}</Text></View>}
-        </ScrollView>
+            ) : <View style={[styles.waiting, { borderColor: colors.border }]}><ActivityIndicator color={colors.cyan} /><Text style={[styles.helper, { color: colors.mutedForeground }]}>{uiText(locale, "waitingHost")}</Text></View>}
+         </ScrollView>
+         <TargetSetupTutorial
+           visible={tutorialVisible}
+           playerNumber={ownPlayer.markerId + 1}
+           onClose={handleTutorialClose}
+         />
       </View>
     );
   }
@@ -621,6 +760,9 @@ export default function BattleLobbyScreen({
       <KeyboardAwareScrollViewCompat keyboardShouldPersistTaps="handled" style={styles.formScroll} contentContainerStyle={[styles.form, { paddingBottom: insets.bottom + 50 }]}>
         <Text style={[styles.hero, { color: colors.foreground }]}>{t("players")}{`\n`}{t("teamBattle")}</Text>
         <Text style={[styles.helper, { color: colors.mutedForeground }]}>{uiText(locale, "startRequirements")}</Text>
+         <View style={[styles.connectionCard, { borderColor: colors.cyan, backgroundColor: colors.card }]}>
+            <Text style={[styles.connectionText, { color: colors.foreground }]}>{uiText(locale, "battleConsent")}</Text>
+         </View>
         {healthQuery.isError ? (
           <View style={[styles.connectionCard, { borderColor: colors.signal, backgroundColor: colors.card }]}>
             <Text style={[styles.connectionText, { color: colors.signal }]}>{formatLobbyError(healthQuery.error, t)}</Text>
@@ -631,21 +773,46 @@ export default function BattleLobbyScreen({
         ) : null}
         {healthQuery.isFetching && !healthQuery.isError ? <Text style={[styles.connectionHint, { color: colors.mutedForeground }]}>{uiText(locale, "serverChecking")}</Text> : null}
         {entryRetryStatus ? <Text testID="entry-retry-status" style={[styles.connectionHint, { color: colors.cyan }]}>{entryRetryStatus}</Text> : null}
-        <TextInput testID="player-name-input" value={name} onChangeText={(value) => { setName(value); setMessage(""); }} maxLength={18} placeholder={uiText(locale, "playerName")} placeholderTextColor={colors.mutedForeground} style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]} />
+         <Pressable
+           testID="qr-consent-toggle"
+           accessibilityRole="checkbox"
+           accessibilityState={{ checked: qrConsent }}
+           onPress={() => setQrConsent((value) => !value)}
+           style={[styles.connectionCard, { borderColor: qrConsent ? colors.cyan : colors.border, backgroundColor: colors.card, flexDirection: "row", alignItems: "center", gap: 10 }]}
+         >
+           <Feather name={qrConsent ? "check-square" : "square"} size={22} color={qrConsent ? colors.cyan : colors.mutedForeground} />
+            <Text style={[styles.connectionText, { color: colors.foreground, flex: 1 }]}>{uiText(locale, "battleConsent")}</Text>
+         </Pressable>
+         <TextInput testID="player-name-input" value={name} onChangeText={(value) => { setName(value); setMessage(""); }} maxLength={18} placeholder={uiText(locale, "playerName")} placeholderTextColor={colors.mutedForeground} style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]} />
         <Text style={[styles.sectionTitle, { color: colors.cyan }]}>{uiText(locale, "createRoom")}</Text>
         <Text style={[styles.sectionHint, { color: colors.mutedForeground }]}>{uiText(locale, "roomCreateHint")}</Text>
-        <Pressable testID="create-room-btn" disabled={busy || !name.trim()} onPress={handleCreate} style={[styles.primary, { backgroundColor: colors.cyan }, (!name.trim() || busy) && styles.disabled]}>
+         <Pressable testID="create-room-btn" disabled={busy || !name.trim() || !qrConsent} onPress={handleCreate} style={[styles.primary, { backgroundColor: colors.cyan }, (!name.trim() || busy || !qrConsent) && styles.disabled]}>
           {create.isPending ? <ActivityIndicator color={colors.ink} /> : <><Text style={[styles.primaryText, { color: colors.ink }]}>{uiText(locale, "createRoom")}</Text><Feather name="plus" size={20} color={colors.ink} /></>}
         </Pressable>
         <View style={styles.or}><View style={[styles.line, { backgroundColor: colors.border }]} /><Text style={[styles.label, { color: colors.mutedForeground }]}>{t("continue")}</Text><View style={[styles.line, { backgroundColor: colors.border }]} /></View>
         <Text style={[styles.sectionTitle, { color: colors.cyan }]}>{uiText(locale, "joinRoom")}</Text>
         <Text style={[styles.sectionHint, { color: colors.mutedForeground }]}>{uiText(locale, "roomJoinHint")}</Text>
         <TextInput testID="room-code-input" value={code} onChangeText={(value) => { setCode(value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase()); setMessage(""); }} maxLength={6} autoCapitalize="characters" autoCorrect={false} placeholder={uiText(locale, "roomCode")} placeholderTextColor={colors.mutedForeground} style={[styles.input, styles.codeInput, { color: colors.cyan, borderColor: colors.border, backgroundColor: colors.card }]} />
-        <Pressable testID="join-room-btn" disabled={busy || !name.trim() || code.length !== 6} onPress={handleJoin} style={[styles.secondary, { borderColor: colors.cyan }, (busy || !name.trim() || code.length !== 6) && styles.disabled]}>
+         <Text style={[styles.helper, { color: colors.mutedForeground, textAlign: "center", marginTop: 8 }]}>{uiText(locale, "manualCodeFallback")}</Text>
+         <Pressable testID="scan-join-qr-btn" onPress={async () => { if (await ensureCameraPermission()) setJoinScannerVisible(true); }} style={[styles.secondary, { borderColor: colors.cyan }]}><Text style={[styles.primaryText, { color: colors.cyan }]}>{uiText(locale, "scanJoinQr")}</Text></Pressable>
+         <Pressable testID="join-room-btn" disabled={busy || !name.trim() || code.length !== 6 || !qrConsent} onPress={handleJoin} style={[styles.secondary, { borderColor: colors.cyan }, (busy || !name.trim() || code.length !== 6 || !qrConsent) && styles.disabled]}>
           {join.isPending ? <ActivityIndicator color={colors.cyan} /> : <Text style={[styles.primaryText, { color: colors.cyan }]}>{uiText(locale, "joinRoom")}</Text>}
         </Pressable>
         {message ? <Text style={[styles.error, { color: colors.signal }]}>{message}</Text> : null}
       </KeyboardAwareScrollViewCompat>
+      <Modal visible={joinScannerVisible} animationType="slide" onRequestClose={() => setJoinScannerVisible(false)}>
+        <View style={[styles.scannerModal, { backgroundColor: colors.background }]}>
+          <Text style={[styles.markerTitle, { color: colors.foreground }]}>{uiText(locale, "scanJoinQr")}</Text>
+          <Text style={[styles.helper, { color: colors.mutedForeground }]}>{uiText(locale, "scanJoinQrHint")}</Text>
+          <CameraView
+            style={styles.joinCamera}
+            facing="back"
+            barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+            onBarcodeScanned={({ data }) => handleJoinQr(data)}
+          />
+          <Pressable onPress={() => setJoinScannerVisible(false)} style={[styles.secondary, { borderColor: colors.cyan }]}><Text style={[styles.primaryText, { color: colors.cyan }]}>{t("close")}</Text></Pressable>
+        </View>
+      </Modal>
       <EconomyGate
         visible={!!entryIntent && !!entryDraft}
         action="teamEntry"
@@ -1037,4 +1204,12 @@ const styles = StyleSheet.create({
   playerName: { flex: 1, fontSize: 14, fontWeight: "700" },
   lives: { fontSize: 12, fontWeight: "800" },
   waiting: { minHeight: 60, borderWidth: 1, borderRadius: 15, marginTop: 18, padding: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10 },
+  qrCard: { borderWidth: 1, borderRadius: 18, padding: 16, marginBottom: 14, alignItems: "center", gap: 10 },
+  pdfCard: { borderWidth: 1, borderRadius: 18, padding: 15, marginBottom: 14, gap: 12 },
+  pdfButtons: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
+  tutorialTrigger: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 8, borderRadius: 8 },
+  tutorialTriggerText: { fontSize: 12, fontWeight: "800", letterSpacing: 0.5 },
+  pdfButton: { minHeight: 38, borderWidth: 1, borderRadius: 9, alignItems: "center", justifyContent: "center", paddingHorizontal: 10 },
+  scannerModal: { flex: 1, padding: 22, paddingTop: 70, gap: 14 },
+  joinCamera: { flex: 1, minHeight: 340, borderRadius: 18, overflow: "hidden" },
 });

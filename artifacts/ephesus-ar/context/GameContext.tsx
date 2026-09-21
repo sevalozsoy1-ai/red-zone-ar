@@ -45,8 +45,11 @@ import {
   type CreditPackageId,
 } from '@/lib/commerce';
 import {
+  DEFAULT_AUDIO_PREFERENCES,
   DEFAULT_AUDIO_VOLUMES,
+  normalizeAudioPreferences,
   normalizeAudioVolumes,
+  type AudioPreferences,
   type AudioVolumes,
 } from '@/lib/audio-settings';
 
@@ -76,6 +79,8 @@ type PersistedState = {
   soloAccessDay?: unknown;
   teamMatchIds?: unknown;
   audioVolumes?: unknown;
+  musicEnabled?: unknown;
+  flashlightEnabled?: unknown;
 };
 
 type GameState = {
@@ -97,6 +102,8 @@ type GameState = {
   soloAccessDay: string | null;
   teamMatchIds: string[];
   audioVolumes: AudioVolumes;
+  musicEnabled: boolean;
+  flashlightEnabled: boolean;
 };
 
 type SimulationSnapshot = Pick<GameState, 'creditCents' | 'unlockedWeapons' | 'weaponUnlocks' | 'commerce'>;
@@ -184,6 +191,9 @@ type GameContextValue = {
   pendingActions: Readonly<Record<string, PendingEconomyAction>>;
   audioVolumes: AudioVolumes;
   setAudioVolumes: (patch: Partial<AudioVolumes>) => void;
+  musicEnabled: boolean;
+  flashlightEnabled: boolean;
+  setAudioPreferences: (patch: Partial<AudioPreferences>) => void;
 };
 
 const defaults: GameState = {
@@ -205,6 +215,7 @@ const defaults: GameState = {
   soloAccessDay: null,
   teamMatchIds: [],
   audioVolumes: DEFAULT_AUDIO_VOLUMES,
+  ...DEFAULT_AUDIO_PREFERENCES,
 };
 
 const GameContext = createContext<GameContextValue | null>(null);
@@ -283,6 +294,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
                 ? persisted.teamMatchIds.filter((value): value is string => typeof value === 'string')
                 : [],
               audioVolumes: normalizeAudioVolumes(persisted.audioVolumes),
+              ...normalizeAudioPreferences({
+                musicEnabled: persisted.musicEnabled,
+                flashlightEnabled: persisted.flashlightEnabled,
+              }),
             };
             const restoredEconomy = restorePendingActions(hydratedState);
             const nextState: GameState = {
@@ -582,6 +597,15 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
        cancelAction,
        audioVolumes: state.audioVolumes,
        setAudioVolumes: (patch) => update({ audioVolumes: normalizeAudioVolumes({ ...stateRef.current.audioVolumes, ...patch }) }),
+        musicEnabled: state.musicEnabled,
+        flashlightEnabled: state.flashlightEnabled,
+        setAudioPreferences: (patch) => update({
+          ...normalizeAudioPreferences({
+            musicEnabled: stateRef.current.musicEnabled,
+            flashlightEnabled: stateRef.current.flashlightEnabled,
+            ...patch,
+          }),
+        }),
     };
     }, [clock, ready, setCountry, setLanguage, setOnboarded, state]);
 

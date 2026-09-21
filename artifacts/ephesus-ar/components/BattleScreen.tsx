@@ -33,9 +33,9 @@ import type { VisionMode } from '@/lib/vision-modes';
 import PlayerMarker from './PlayerMarker';
 import { weaponActionLabel, weaponCategoryLabel, uiText } from '@/lib/i18n';
 import { rtlLayout } from '@/lib/rtl';
-import { battleHudStatus, getMarkerTarget, isBattleCombatDisabled, isGoneBattleSession, shouldApplyBattleSnapshot } from '@/lib/battle-ui';
+import { battleHudStatus, isBattleCombatDisabled, isGoneBattleSession, shouldApplyBattleSnapshot } from '@/lib/battle-ui';
 import { setBattleSessionToken } from '@/lib/battle-auth';
-import { createMarkerLockState, detectPlayerMarker, updateMarkerAuthorization } from '@/lib/marker-detection';
+import { getEligibleQrTarget, getQrTargetMode, isQrWithinExpandedHitRegion, parseTargetPayload } from '@/lib/qr-target';
 import { economyText, formatUsdFromCents } from '@/lib/economy-ui';
 import {
   createMatchMagazineInventory,
@@ -44,7 +44,7 @@ import {
   reloadMagazine,
   setMagazineAmmo,
 } from '@/lib/battle-ammo';
-import { ActivityIndicator, Alert, AppState, BackHandler, Linking, Modal, Platform, Pressable, StyleSheet, Text, View, Animated, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, AppState, BackHandler, Linking, Modal, Platform, Pressable, StyleSheet, Switch, Text, View, Animated, useWindowDimensions } from 'react-native';
 import { battleSessionCopy } from '@/lib/battle-session-copy';
 import { handleBattleAppStateChange, handleBattleHardwareBack } from '@/lib/battle-session-lifecycle';
 import { createShotId, useBattleSocket } from '@/lib/battle-socket';
@@ -131,9 +131,10 @@ export default function BattleScreen({
   const ownPlayer = room?.players.find((player) => player.id === battleSession?.playerId);
   const [detectedMarkerId, setDetectedMarkerId] = useState<number | null>(null);
   const detectedMarkerRef = useRef<number | null>(null);
-  const markerAuthorizationRef = useRef(createMarkerLockState());
+  const qrObservationRef = useRef<{ markerId: number; observedAt: number } | null>(null);
+  const [clock, setClock] = useState(Date.now());
   const clearDetectedTarget = useCallback(() => {
-    markerAuthorizationRef.current = createMarkerLockState();
+    qrObservationRef.current = null;
     detectedMarkerRef.current = null;
     setDetectedMarkerId(null);
   }, []);
@@ -152,15 +153,43 @@ export default function BattleScreen({
     adOpen: false,
     reloading: false,
   });
-  const aimedMarkerTarget = getMarkerTarget(
-    room?.players,
-    ownPlayer?.id,
-    detectedMarkerId,
-  );
-  const hasValidAimedTarget = combatReady && aimedMarkerTarget !== null;
+  const retainedQrTarget = qrObservationRef.current
+    ? getEligibleQrTarget(room?.players, ownPlayer?.id, qrObservationRef.current.markerId)
+    : null;
+  const eligibleOpponents = room?.players.filter((player) =>
+    player.id !== ownPlayer?.id && player.alive && player.markerId >= 0,
+  ) ?? [];
+  // A QR observation selects a target and remains useful after the camera
+  // briefly loses focus. Automatic selection is deliberately only allowed
+  // when there is exactly one eligible opponent; never guess in a larger room.
+  const automaticTarget = retainedQrTarget ? null : eligibleOpponents.length === 1
+    ? eligibleOpponents[0]
+    : null;
+  const networkTarget = retainedQrTarget ?? automaticTarget;
+  const targetMode = getQrTargetMode({
+    observedAt: qrObservationRef.current?.observedAt,
+    now: clock,
+    hasRetainedTarget: !!retainedQrTarget,
+    hasAutomaticTarget: !!automaticTarget,
+  });
+  const targetStatusKey = targetMode === 'fresh'
+    ? 'qrFreshTarget'
+    : targetMode === 'retained'
+      ? 'qrRetainedLock'
+      : targetMode === 'automatic'
+        ? 'qrAutomaticTarget'
+        : 'qrNoTarget';
+  useEffect(() => {
+    if (
+      qrObservationRef.current
+      && !getEligibleQrTarget(room?.players, ownPlayer?.id, qrObservationRef.current.markerId)
+    ) {
+      clearDetectedTarget();
+    }
+  }, [clearDetectedTarget, ownPlayer?.id, room?.players]);
+  const hasValidAimedTarget = combatReady && networkTarget !== null;
   const [combatFlash, setCombatFlash] = useState<'hit' | 'hurt' | null>(null);
   const [shotMessage, setShotMessage] = useState('');
-  const [clock, setClock] = useState(Date.now());
   const previousHealthRef = useRef<{ hp: number; lives: number } | null>(null);
   const suppressNextHealthFlashRef = useRef(false);
   const suppressHealthFlashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -171,7 +200,15 @@ export default function BattleScreen({
   const seenNetworkHitIdsRef = useRef(new Set<string>());
   const flashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
-  const { selectedWeapon, setSelectedWeapon, activeGold, creditCents } = useGame();
+  const {
+    selectedWeapon,
+    setSelectedWeapon,
+    activeGold,
+    creditCents,
+    flashlightEnabled,
+    musicEnabled,
+    setAudioPreferences,
+  } = useGame();
   const { playShot, playReload, playTestSound, prepareWeapon, error } = useWeaponAudio();
   
   const [ammo, setAmmo] = useState(0);
@@ -537,11 +574,7 @@ export default function BattleScreen({
     const hasKnifeInventory = activeGoldRef.current || w.id !== 'knife' || ammoRef.current > 0;
     const hasAmmo = activeGoldRef.current || (w.id === 'knife' ? hasKnifeInventory : ammoRef.current > 0);
     if (knifeThrowRunningRef.current || !isLiveRef.current || showAdRef.current || reloadingRef.current || !hasAmmo || now - lastFireTimeRef.current < cooldown) return false;
-    const networkTarget = getMarkerTarget(
-      room?.players,
-      ownPlayer?.id,
-      detectedMarkerRef.current,
-    );
+    const networkTargetAtFire = networkTarget;
     lastFireTimeRef.current = now;
     // This is intentionally after all local fire guards. The camera component
     // treats the torch as an optional visual aid and safely ignores unsupported
@@ -562,11 +595,11 @@ export default function BattleScreen({
     }
     recoilAnim.setValue(w.recoil * 3);
     Animated.spring(recoilAnim, { toValue: 0, friction: 6, tension: 120, useNativeDriver: true }).start();
-    if (battleSession && networkTarget) {
+    if (battleSession && networkTargetAtFire) {
       const shotId = createShotId();
       const intent = {
         shotId,
-        targetPlayerId: networkTarget.id,
+        targetPlayerId: networkTargetAtFire.id,
         weaponId: w.id,
         fireMode,
         clientFiredAt: now,
@@ -582,7 +615,7 @@ export default function BattleScreen({
           code: battleSession.room.code,
           data: {
             shotId,
-            targetPlayerId: networkTarget.id,
+            targetPlayerId: networkTargetAtFire.id,
             firedAt: now,
             weaponId: w.id,
             fireMode,
@@ -834,30 +867,27 @@ export default function BattleScreen({
             onStatus={setStatus}
             restartKey={restartKey}
             fireSignal={fireSignal}
+            flashlightEnabled={flashlightEnabled}
             facing={cameraFacing}
-            onFrame={(frame) => {
+             onBarcodeScanned={(result) => {
               if (!room || !ownPlayer) {
                 clearDetectedTarget();
                 return;
               }
-              const observedMarkerId = detectPlayerMarker(
-                frame,
-                room.players.filter((player) =>
-                  player.id !== ownPlayer.id
-                  && player.alive,
-                ),
-                { x: 0, y: 0 },
-                { width, height },
-              );
-              const authorizedMarkerId = updateMarkerAuthorization(
-                markerAuthorizationRef.current,
-                observedMarkerId,
-                Date.now(),
-              );
-              detectedMarkerRef.current = authorizedMarkerId;
-              setDetectedMarkerId((current) =>
-                current === authorizedMarkerId ? current : authorizedMarkerId
-              );
+               const markerId = parseTargetPayload(result.data);
+               const now = Date.now();
+               const target = getEligibleQrTarget(room.players, ownPlayer.id, markerId);
+               const centered = isQrWithinExpandedHitRegion(
+                 { cornerPoints: result.cornerPoints, bounds: result.bounds },
+                 { width, height },
+               );
+               // Invalid/temporarily out-of-frame scans must not erase the
+               // last valid selection. A later room snapshot invalidates it
+               // automatically when the player dies or leaves.
+               if (markerId === null || !target || !centered) return;
+               qrObservationRef.current = { markerId, observedAt: now };
+               detectedMarkerRef.current = markerId;
+               setDetectedMarkerId(markerId);
             }}
             onFacingUnavailable={(failedFacing) => {
               if (failedFacing === 'back') {
@@ -947,9 +977,56 @@ export default function BattleScreen({
                               : t('ready')}
                   </Text>
                 ) : null}
-           </View>
+                {battleSession ? (
+                  <View style={{ alignItems: 'center', maxWidth: 220 }}>
+                    <Text
+                      testID="battle-target-status"
+                      numberOfLines={1}
+                      style={[s.serverStatus, { color: hasValidAimedTarget ? colors.signal : colors.mutedForeground }]}
+                    >
+                      {t(targetStatusKey)}
+                    </Text>
+                    <Text numberOfLines={2} style={[s.serverStatus, { color: colors.mutedForeground, textAlign: 'center' }]}>
+                      {t('qrTargetHelp')}
+                    </Text>
+                    {eligibleOpponents.length > 1 && networkTarget ? (
+                      <Pressable
+                        testID="battle-clear-target"
+                        accessibilityRole="button"
+                        accessibilityLabel={t('qrClearTarget')}
+                        onPress={clearDetectedTarget}
+                        style={{ paddingHorizontal: 8, paddingVertical: 3 }}
+                      >
+                        <Text style={{ color: colors.amber, fontSize: 11, fontWeight: '700' }}>{t('qrClearTarget')}</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                ) : null}
+            </View>
 
            <View style={s.topRight}>
+                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+                   <Pressable
+                     testID="battle-music-toggle"
+                     accessibilityRole="switch"
+                     accessibilityLabel={musicEnabled ? t('musicOn') : t('musicOff')}
+                     accessibilityState={{ checked: musicEnabled }}
+                     onPress={() => setAudioPreferences({ musicEnabled: !musicEnabled })}
+                     style={[s.close, { backgroundColor: colors.overlay }]}
+                   >
+                     <Feather name={musicEnabled ? 'music' : 'volume-x'} size={16} color={musicEnabled ? colors.cyan : colors.mutedForeground} />
+                   </Pressable>
+                   <Pressable
+                     testID="battle-flashlight-toggle"
+                     accessibilityRole="switch"
+                     accessibilityLabel={flashlightEnabled ? t('flashlightOn') : t('flashlightOff')}
+                     accessibilityState={{ checked: flashlightEnabled }}
+                     onPress={() => setAudioPreferences({ flashlightEnabled: !flashlightEnabled })}
+                     style={[s.close, { backgroundColor: colors.overlay }]}
+                   >
+                     <Feather name="zap" size={16} color={flashlightEnabled ? colors.amber : colors.mutedForeground} />
+                   </Pressable>
+                 </View>
                 <View style={s.creditHud}>
                   <Feather name={activeGold ? 'award' : 'zap'} size={12} color={activeGold ? '#ffd700' : '#72f1d0'} />
                   <Text testID="battle-credit-balance" style={s.creditHudText}>{activeGold ? 'VIP' : formatUsdFromCents(creditCents, locale)}</Text>
