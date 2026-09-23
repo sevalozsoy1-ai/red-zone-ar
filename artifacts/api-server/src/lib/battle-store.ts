@@ -58,6 +58,15 @@ type StoredNetworkShotOutcome = {
   eliminated: boolean;
 };
 
+type StoredPendingShotIntent = {
+  shotId: string;
+  shooterId: string;
+  targetId: string;
+  weaponId: string;
+  fireMode: BattleFireMode;
+  firedAt: number;
+  createdAt: number;
+};
 type StoredEntryRequest = {
   requestId: string;
   kind: "create" | "join";
@@ -71,6 +80,7 @@ export type StoredBattleRoom = Omit<BattleRoom, "effects"> & {
   sessions: StoredSession[];
   /** Bounded, durable idempotency records for socket shot intents. */
   networkShotOutcomes: StoredNetworkShotOutcome[];
+  pendingShotIntents: StoredPendingShotIntent[];
   /** Durable identity for create/join retries; bearer tokens remain hash-only. */
   entryRequests: StoredEntryRequest[];
 };
@@ -141,6 +151,7 @@ const WEAPONS: Record<string, WeaponSpec> = {
 };
 
 const MAX_HP = 100;
+const STARTING_LIVES = 5;
 const MARKERS = ["#FF2D55", "#00E5FF", "#FFD60A", "#7CFF6B", "#BF5AF2", "#FF9F0A", "#64D2FF", "#FF375F", "#30D158", "#AC8E68"];
 
 /**
@@ -163,6 +174,7 @@ const MAX_ENTRY_REQUESTS = 64;
 const ENTRY_RETRY_WINDOW_MS = 15_000;
 const MAX_NETWORK_SHOT_OUTCOMES = 256;
 
+const SHOT_OBSERVATION_WINDOW_MS = 2200;
 const EXPIRED_SESSION_RETENTION_MS = PLAYER_TIMEOUT_MS;
 function id() {
   return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 9)}`;
@@ -434,6 +446,7 @@ function hydrate(snapshot: StoredBattleRoom) {
   room.winnerPlayerId ??= null;
   room.startedPlayerIds ??= room.status === "lobby" ? [] : room.players.map((player) => player.id);
   room.networkShotOutcomes ??= [];
+  room.pendingShotIntents ??= [];
   room.entryRequests ??= [];
   rooms.set(room.code, room);
   for (const storedSession of room.sessions) {
@@ -581,13 +594,33 @@ function player(name: string, markerId: number, isHost: boolean): BattlePlayer {
     name: normalizedName,
     markerId,
     markerColor: MARKERS[markerId],
-    lives: 3,
+    lives: STARTING_LIVES,
     hp: MAX_HP,
     alive: true,
     respawnAt: 0,
     isHost,
     connected: true,
   };
+}
+
+/**
+ * A finished room is retained so its result can be observed and persisted.
+ * The next join starts a new round in that same room rather than allocating a
+ * second room or exposing the terminal state to the rematch.
+ */
+function resetFinishedRoomForRematch(room: StoredBattleRoom) {
+  room.status = "active";
+  room.winnerPlayerId = null;
+  room.draw = false;
+  room.effects = [];
+  room.networkShotOutcomes = [];
+  room.pendingShotIntents = [];
+  for (const retainedPlayer of room.players) {
+    retainedPlayer.lives = STARTING_LIVES;
+    retainedPlayer.hp = MAX_HP;
+    retainedPlayer.alive = true;
+    retainedPlayer.respawnAt = 0;
+  }
 }
 
 function addSession(room: StoredBattleRoom, playerId: string) {
@@ -730,6 +763,7 @@ async function createRoomUnlocked(name: string, requestId?: string) {
     startedPlayerIds: [host.id],
     sessions: [],
     networkShotOutcomes: [],
+    pendingShotIntents: [],
     entryRequests: [],
   };
   rooms.set(room.code, room);
@@ -743,11 +777,11 @@ async function createRoomUnlocked(name: string, requestId?: string) {
   };
 }
 
-export function joinRoom(code: string, name: string, requestId?: string) {
-  return withStoreOperation(() => joinRoomUnlocked(code, name, requestId));
+export function joinRoom(code: string, name: string, requestId?: string, token?: string) {
+  return withStoreOperation(() => joinRoomUnlocked(code, name, requestId, token));
 }
 
-async function joinRoomUnlocked(code: string, name: string, requestId?: string) {
+async function joinRoomUnlocked(code: string, name: string, requestId?: string, token?: string) {
   await ensureLoaded();
   const normalizedCode = code.toUpperCase();
   const normalizedRequestId = validEntryRequestId(requestId);
@@ -763,14 +797,46 @@ async function joinRoomUnlocked(code: string, name: string, requestId?: string) 
     await removePersistedRoom(room.code);
     throw new Error("ROOM_NOT_FOUND");
   }
-  if (room.status === "finished") throw new Error("ROOM_STARTED");
-  if (room.players.length >= room.maxPlayers) throw new Error("ROOM_FULL");
-  const occupiedMarkers = new Set(room.players.map((entry) => entry.markerId));
-  const markerId = MARKERS.findIndex((_marker, index) => !occupiedMarkers.has(index));
-  if (markerId < 0) throw new Error("ROOM_FULL");
-  const joined = player(name, markerId, false);
-  room.players.push(joined);
-  room.startedPlayerIds.push(joined.id);
+  const wasFinished = room.status === "finished";
+  const normalizedName = name.trim();
+  if (!normalizedName) throw new Error("INVALID_NAME");
+  let authenticatedPlayerId: string | undefined;
+  if (token) {
+    const tokenHash = hashToken(token);
+    const storedSession = sessions.get(tokenHash);
+    if (!storedSession || storedSession.code !== room.code) throw new Error("UNAUTHORIZED");
+    const authenticatedPlayer = room.players.find((entry) => entry.id === storedSession.playerId);
+    if (!authenticatedPlayer || authenticatedPlayer.name !== normalizedName) throw new Error("UNAUTHORIZED");
+    authenticatedPlayerId = authenticatedPlayer.id;
+  }
+  if (wasFinished && !authenticatedPlayerId) throw new Error("UNAUTHORIZED");
+
+  if (wasFinished) resetFinishedRoomForRematch(room);
+
+  // A rematching player keeps their durable identity/marker, but receives a
+  // newly rotated bearer session so the old round cannot remain authenticated.
+  let joined = authenticatedPlayerId
+    ? room.players.find((entry) => entry.id === authenticatedPlayerId)
+    : undefined;
+  if (joined) {
+    for (const [tokenHash, storedSession] of sessions) {
+      if (storedSession.code === room.code && storedSession.playerId === joined.id) {
+        sessions.delete(tokenHash);
+      }
+    }
+    room.sessions = room.sessions.filter(
+      (storedSession) => !(storedSession.code === room.code && storedSession.playerId === joined!.id),
+    );
+    joined.connected = true;
+  } else {
+    if (room.players.length >= room.maxPlayers) throw new Error("ROOM_FULL");
+    const occupiedMarkers = new Set(room.players.map((entry) => entry.markerId));
+    const markerId = MARKERS.findIndex((_marker, index) => !occupiedMarkers.has(index));
+    if (markerId < 0) throw new Error("ROOM_FULL");
+    joined = player(normalizedName, markerId, false);
+    room.players.push(joined);
+  }
+  room.startedPlayerIds = room.players.map((entry) => entry.id);
   touchRoom(room);
   const session = addSession(room, joined.id);
   rememberEntryRequest(room, "join", normalizedRequestId, joined.id);
@@ -982,6 +1048,76 @@ export function fireShotByPlayerId(
   });
 }
 
+export function registerShotIntent(
+  code: string,
+  token: string,
+  shotId: string,
+  targetPlayerId: string,
+  firedAt: number,
+  weaponId: string,
+  fireMode: BattleFireMode,
+) {
+  return withStoreOperation(async () => {
+    const authorized = await authorizedRoom(code, token, { persistRefresh: false });
+    const room = authorized.room;
+    const previous = room.networkShotOutcomes.find(
+      (entry) => entry.shooterId === authorized.playerId && entry.shotId === shotId,
+    );
+    if (previous) return { ...publicNetworkOutcome(previous, room), pending: false };
+    const existing = room.pendingShotIntents.find(
+      (entry) => entry.shooterId === authorized.playerId && entry.shotId === shotId,
+    );
+    if (existing) return {
+      accepted: true,
+      pending: true,
+      reason: "AWAITING_OBSERVATION",
+      shooterId: authorized.playerId,
+      targetId: existing.targetId,
+      damage: 0,
+      eliminated: false,
+      room: publicRoom(room, authorized.playerId),
+      duplicate: true,
+      shotId,
+    };
+    const now = clock();
+    const target = room.players.find((entry) => entry.id === targetPlayerId);
+    if (!target || target.id === authorized.playerId || !target.alive) {
+      return { accepted: false, pending: false, shotId, reason: "INVALID_TARGET", shooterId: authorized.playerId, targetId: "", damage: 0, eliminated: false, room: publicRoom(room, authorized.playerId), duplicate: false };
+    }
+    if (!WEAPONS[weaponId] || (fireMode !== "primary" && fireMode !== "throw")) {
+      return { accepted: false, pending: false, shotId, reason: "INVALID_SHOT_INTENT", shooterId: authorized.playerId, targetId: targetPlayerId, damage: 0, eliminated: false, room: publicRoom(room, authorized.playerId), duplicate: false };
+    }
+    if (!Number.isFinite(firedAt) || Math.abs(now - firedAt) > 5000) {
+      return { accepted: false, pending: false, shotId, reason: "SHOT_TIMEOUT", shooterId: authorized.playerId, targetId: targetPlayerId, damage: 0, eliminated: false, room: publicRoom(room, authorized.playerId), duplicate: false };
+    }
+    room.pendingShotIntents = room.pendingShotIntents
+      .filter((entry) => now - entry.createdAt <= SHOT_OBSERVATION_WINDOW_MS)
+      .concat({
+        shotId,
+        shooterId: authorized.playerId,
+        targetId: targetPlayerId,
+        weaponId,
+        fireMode,
+        firedAt,
+        createdAt: now,
+      })
+      .slice(-64);
+    renewPresence(authorized);
+    await persistRoom(room);
+    return {
+      accepted: true,
+      pending: true,
+      reason: "AWAITING_OBSERVATION",
+      shooterId: authorized.playerId,
+      targetId: targetPlayerId,
+      damage: 0,
+      eliminated: false,
+      room: publicRoom(room, authorized.playerId),
+      duplicate: false,
+      shotId,
+    };
+  });
+}
 async function fireShotUnlocked(
   code: string,
   token: string,
@@ -1191,3 +1327,78 @@ function scheduleExpirySweep() {
   // Battle sessions must not keep an otherwise idle API process alive.
   expiryTimer.unref();
 }
+
+export function confirmFlashObservation(
+  code: string,
+  token: string,
+  observedAt: number,
+  confidence: number,
+  shooterBeaconId: number,
+) {
+  return withStoreOperation(async () => {
+    const observer = await authorizedRoom(code, token, { persistRefresh: false });
+    const now = clock();
+    if (!Number.isFinite(observedAt) || Math.abs(now - observedAt) > OBSERVATION_CLOCK_SKEW_MS) {
+      return { accepted: false, reason: "OBSERVATION_EXPIRED" };
+    }
+    if (!Number.isFinite(confidence) || confidence < MIN_FLASH_CONFIDENCE || confidence > 1) {
+      return { accepted: false, reason: "OBSERVATION_LOW_CONFIDENCE" };
+    }
+    if (!Number.isInteger(shooterBeaconId) || shooterBeaconId < 0 || shooterBeaconId >= MARKERS.length) {
+      return { accepted: false, reason: "INVALID_BEACON" };
+    }
+    observer.room.pendingShotIntents = observer.room.pendingShotIntents.filter(
+      (entry) => now - entry.createdAt <= SHOT_OBSERVATION_WINDOW_MS,
+    );
+    const candidates = observer.room.pendingShotIntents
+      .filter((entry) =>
+        entry.targetId === observer.playerId
+        && observer.room.players.some((player) => player.id === entry.shooterId && player.markerId === shooterBeaconId)
+        && entry.createdAt <= now
+        && now - entry.createdAt <= SHOT_OBSERVATION_WINDOW_MS
+        // The phone clock may differ from the server's, but a reading captured
+        // well before the shot must never confirm it when delivered late.
+        && observedAt >= entry.createdAt - 1000
+      )
+      .sort((a, b) => a.createdAt - b.createdAt);
+    if (candidates.length === 0) {
+      await persistRoom(observer.room);
+      return { accepted: false, reason: "NO_MATCHING_SHOT" };
+    }
+    // One fresh sensor reading confirms at most one shot. Legal automatic
+    // bursts must not make all of that shooter's pending shots ambiguous.
+    const matching = candidates[0];
+    const shooterSession = observer.room.sessions.find((entry) => entry.playerId === matching.shooterId);
+    if (!shooterSession) return { accepted: false, reason: "SHOOTER_UNAVAILABLE" };
+    observer.room.pendingShotIntents = observer.room.pendingShotIntents.filter(
+      (entry) => entry.shotId !== matching.shotId || entry.shooterId !== matching.shooterId,
+    );
+    const result = await fireShotUnlocked(
+      code,
+      "",
+      observer.room.players.find((entry) => entry.id === observer.playerId)?.markerId ?? -1,
+      matching.firedAt,
+      matching.weaponId,
+      matching.fireMode,
+      {
+        authorized: {
+          playerId: matching.shooterId,
+          tokenHash: shooterSession.tokenHash,
+          session: shooterSession,
+          room: observer.room,
+        },
+        persist: false,
+      },
+    );
+    observer.room.networkShotOutcomes = [
+      ...observer.room.networkShotOutcomes,
+      storedNetworkOutcome(matching.shotId, result),
+    ].slice(-MAX_NETWORK_SHOT_OUTCOMES);
+    await persistRoom(observer.room);
+    return { ...result, shotId: matching.shotId, duplicate: false };
+  });
+}
+
+const OBSERVATION_CLOCK_SKEW_MS = 5000;
+
+const MIN_FLASH_CONFIDENCE = 0.65;

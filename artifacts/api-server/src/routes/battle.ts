@@ -1,8 +1,6 @@
 import { Router, type IRouter } from "express";
 import {
   CreateBattleRoomBody,
-  FireBattleShotBody,
-  FireBattleShotParams,
   FireNetworkBattleShotBody,
   FireNetworkBattleShotParams,
   GetBattleStateQueryParams,
@@ -14,8 +12,7 @@ import {
 } from "@workspace/api-zod";
 import {
   createRoom,
-  fireShot,
-  fireShotByPlayerId,
+  registerShotIntent,
   getRoom,
   heartbeatRoom,
   joinRoom,
@@ -50,6 +47,15 @@ function bearerToken(req: { header(name: string): string | undefined }) {
   return token;
 }
 
+function optionalBearerToken(req: { header(name: string): string | undefined }) {
+  const header = req.header("authorization")?.trim();
+  if (!header) return undefined;
+  if (!/^Bearer\s+/i.test(header)) throw new Error("UNAUTHORIZED");
+  const token = header.replace(/^Bearer\s+/i, "").trim();
+  if (!token) throw new Error("UNAUTHORIZED");
+  return token;
+}
+
 router.post("/battle/rooms", async (req, res) => {
   const body = CreateBattleRoomBody.safeParse(req.body);
   if (!body.success) { res.status(400).json({ error: body.error.message }); return; }
@@ -60,7 +66,14 @@ router.post("/battle/rooms/:code/players", async (req, res) => {
   const params = JoinBattleRoomParams.safeParse(req.params);
   const body = JoinBattleRoomBody.safeParse(req.body);
   if (!params.success || !body.success) { res.status(400).json({ error: "INVALID_REQUEST" }); return; }
-  try { res.json(await joinRoom(params.data.code, body.data.name, body.data.requestId)); } catch (error) { fail(res, error); }
+  try {
+    res.json(await joinRoom(
+      params.data.code,
+      body.data.name,
+      body.data.requestId,
+      optionalBearerToken(req),
+    ));
+  } catch (error) { fail(res, error); }
 });
 
 router.get("/battle/state", async (req, res) => {
@@ -93,20 +106,9 @@ router.post("/battle/rooms/:code/heartbeat", async (req, res) => {
   try { res.json(await heartbeatRoom(params.data.code, bearerToken(req))); } catch (error) { fail(res, error); }
 });
 
-router.post("/battle/rooms/:code/shots", async (req, res) => {
-  const params = FireBattleShotParams.safeParse(req.params);
-  const body = FireBattleShotBody.safeParse(req.body);
-  if (!params.success || !body.success) { res.status(400).json({ error: "INVALID_REQUEST" }); return; }
-  try {
-    res.json(await fireShot(
-      params.data.code,
-      bearerToken(req),
-      body.data.markerId,
-      body.data.firedAt,
-      body.data.weaponId,
-      body.data.fireMode,
-    ));
-  } catch (error) { fail(res, error); }
+router.post("/battle/rooms/:code/shots", (_req, res) => {
+  // Old clients could supply a marker ID and bypass the target's camera.
+  res.status(410).json({ error: "UPDATE_REQUIRED" });
 });
 
 router.post("/battle/rooms/:code/network-shots", async (req, res) => {
@@ -114,7 +116,9 @@ router.post("/battle/rooms/:code/network-shots", async (req, res) => {
   const body = FireNetworkBattleShotBody.safeParse(req.body);
   if (!params.success || !body.success) { res.status(400).json({ error: "INVALID_REQUEST" }); return; }
   try {
-    res.json(await fireShotByPlayerId(
+    // A network shot is always pending until the authenticated target reports
+    // the shooter's coded beacon. Never let a client disable that requirement.
+    res.json(await registerShotIntent(
       params.data.code,
       bearerToken(req),
       body.data.shotId,

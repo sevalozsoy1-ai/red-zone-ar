@@ -2,8 +2,9 @@ import type { Server as HttpServer } from "node:http";
 import { Server, type Socket } from "socket.io";
 import {
   authenticateBattleSession,
-  fireShotByPlayerId,
+  confirmFlashObservation,
   getPublicBattleSnapshot,
+  registerShotIntent,
   type BattleFireMode,
 } from "../lib/battle-store";
 
@@ -26,6 +27,17 @@ type AuthenticatedSocket = Socket & {
     sessionToken: string;
   };
 };
+
+function parseFlashObservation(value: unknown) {
+  if (!value || typeof value !== "object") return undefined;
+  const input = value as Record<string, unknown>;
+  const observedAt = typeof input.observedAt === "number" && Number.isFinite(input.observedAt) ? input.observedAt : undefined;
+  const confidence = typeof input.confidence === "number" && Number.isFinite(input.confidence) ? input.confidence : undefined;
+  const shooterBeaconId = typeof input.shooterBeaconId === "number" && Number.isInteger(input.shooterBeaconId)
+    && input.shooterBeaconId >= 0 && input.shooterBeaconId < 10 ? input.shooterBeaconId : undefined;
+  return observedAt === undefined || confidence === undefined || shooterBeaconId === undefined
+    ? undefined : { observedAt, confidence, shooterBeaconId };
+}
 
 function text(value: unknown) {
   return typeof value === "string" && value.length > 0 && value.length <= MAX_ID_LENGTH
@@ -101,7 +113,7 @@ export function attachBattleSocket(httpServer: HttpServer) {
         return;
       }
       try {
-        const result = await fireShotByPlayerId(
+        const result = await registerShotIntent(
           authenticated.data.roomCode,
           authenticated.data.sessionToken,
           intent.shotId,
@@ -114,22 +126,34 @@ export function attachBattleSocket(httpServer: HttpServer) {
           accepted: result.accepted,
           reason: result.reason,
           shotId: intent.shotId,
+          pending: result.pending,
+        });
+        // The intent only opens a short server-owned observation window.
+        // Damage is applied after the authenticated target reports a flash.
+      } catch {
+        acknowledge?.({ accepted: false, reason: "SHOT_FAILED", shotId: intent.shotId });
+      }
+    });
+
+    authenticated.on("battle:flash-observation", async (payload: unknown) => {
+      const observation = parseFlashObservation(payload);
+      if (!observation) return;
+      try {
+        const result = await confirmFlashObservation(
+          authenticated.data.roomCode,
+          authenticated.data.sessionToken,
+          observation.observedAt,
+          observation.confidence,
+          observation.shooterBeaconId,
+        );
+        if (!result.accepted || !("shotId" in result) || result.damage <= 0) return;
+        io.to(`${ROOM_PREFIX}${authenticated.data.roomCode}`).emit("battle:hit-confirmed", {
+          shotId: result.shotId,
           shooterId: result.shooterId,
           targetId: result.targetId,
           damage: result.damage,
           eliminated: result.eliminated,
         });
-        if (!result.duplicate && result.accepted && result.damage > 0) {
-          io.to(`${ROOM_PREFIX}${authenticated.data.roomCode}`).emit("battle:hit-confirmed", {
-            shotId: intent.shotId,
-            shooterId: result.shooterId,
-            targetId: result.targetId,
-            damage: result.damage,
-            eliminated: result.eliminated,
-          });
-        }
-        // Push the authoritative snapshot immediately. REST polling remains
-        // the recovery path, but combat no longer waits for its next tick.
         const roomName = `${ROOM_PREFIX}${authenticated.data.roomCode}`;
         const sockets = await io.in(roomName).fetchSockets();
         await Promise.all(sockets.map(async (roomSocket) => {
@@ -145,9 +169,7 @@ export function attachBattleSocket(httpServer: HttpServer) {
             // session; never send another player's filtered snapshot.
           }
         }));
-      } catch {
-        acknowledge?.({ accepted: false, reason: "SHOT_FAILED", shotId: intent.shotId });
-      }
+      } catch {}
     });
   });
 
