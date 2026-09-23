@@ -50,7 +50,6 @@
           "enableBackgroundPlayback": false
         }
       ],
-      "expo-sharing",
       "expo-asset"
     ],
     "experiments": {
