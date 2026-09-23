@@ -25,29 +25,6 @@ export interface BattleJoinInput {
 
 export interface BattleAccessInput { [key: string]: unknown }
 
-export type BattleShotInputFireMode = typeof BattleShotInputFireMode[keyof typeof BattleShotInputFireMode];
-
-
-export const BattleShotInputFireMode = {
-  primary: 'primary',
-  throw: 'throw',
-} as const;
-
-export interface BattleShotInput {
-  /**
-     * @minimum 0
-     * @maximum 9
-     */
-  markerId: number;
-  firedAt: number;
-  /**
-     * @minLength 1
-     * @maxLength 32
-     */
-  weaponId: string;
-  fireMode: BattleShotInputFireMode;
-}
-
 export type NetworkBattleShotInputFireMode = typeof NetworkBattleShotInputFireMode[keyof typeof NetworkBattleShotInputFireMode];
 
 
@@ -144,6 +121,7 @@ export interface BattleShotResult {
   damage: number;
   eliminated: boolean;
   room: BattleRoom;
+  pending?: boolean;
 }
 
 export type GetBattleStateParams = {

@@ -5,17 +5,13 @@ export type CameraFrame = {
 };
 
 export type CameraStatus = {
-  state: "requesting" | "live" | "blocked" | "error" | "paused";
+  state: "requesting" | "live" | "blocked" | "error" | "paused" | "unsupported";
   message: string;
 };
 
 export type LiveBattleCameraProps = {
   onFrame?: (frame: CameraFrame) => void;
-  onBarcodeScanned?: (result: {
-    data: string;
-    cornerPoints?: { x: number; y: number }[];
-    bounds?: { origin?: { x: number; y: number }; size?: { width: number; height: number } };
-  }) => void;
+  onFlashObservation?: (observation: { observedAt: number; confidence: number }) => void;
   onStatus: (status: CameraStatus) => void;
   restartKey: number;
   facing: "front" | "back";

@@ -21,6 +21,7 @@ export type WeaponAudio = {
   playShot: (id: WeaponId) => void;
   playReload: () => void;
   playTestSound: (id: WeaponId) => void;
+  prepareWeapon: (id: WeaponId) => void;
   error: string | null;
 };
 
@@ -198,6 +199,13 @@ export function useWeaponAudio(): WeaponAudio {
     pending.forEach((key) => play(key));
   }, [gameReady, play]);
   const playTestSound = useCallback((id: WeaponId) => play(id), [play]);
+  const prepareWeapon = useCallback((id: WeaponId) => {
+    const audioContext = context.current;
+    if (!audioContext || audioContext.state === 'closed') return;
+    void loadBuffer(audioContext, id).catch(() => {
+      // loadBuffer already records a user-facing error.
+    });
+  }, [loadBuffer]);
 
-  return { playShot, playReload, playTestSound, error };
+  return { playShot, playReload, playTestSound, prepareWeapon, error };
 }

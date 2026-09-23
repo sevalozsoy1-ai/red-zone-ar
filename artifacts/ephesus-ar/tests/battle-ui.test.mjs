@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import {
   battleHudStatus,
   getMarkerTarget,
-  getNetworkTarget,
   isBattleCombatDisabled,
   isGoneBattleSession,
   releaseBattleShot,
@@ -50,18 +49,17 @@ test('knife throw draw lock blocks controls while the active battle is otherwise
   assert.equal(isBattleCombatDisabled({ ...activeCombat, actionLocked: false }), false);
 });
 
-test('network targeting selects the active connected room opponent without camera filtering', () => {
+test('camera targeting resolves only the explicitly detected alive opponent', () => {
   const players = [
     { id: 'self', alive: true, connected: true, markerId: 0 },
     { id: 'dead', alive: false, connected: true, markerId: 1 },
     { id: 'away', alive: true, connected: false, markerId: 2 },
     { id: 'live', alive: true, connected: true, markerId: 3 },
   ];
-  const selected = getNetworkTarget(players, 'self');
-  assert.equal(selected.target?.id, 'live');
-  assert.equal(selected.reason, null);
-  assert.equal(getNetworkTarget(players.slice(0, 3), 'self').reason, 'NO_TARGET');
-  assert.equal(getNetworkTarget([players[0], players[2]], 'self').reason, 'NO_OPPONENT');
+  assert.equal(getMarkerTarget(players, 'self', 3)?.id, 'live');
+  assert.equal(getMarkerTarget(players, 'self', 2)?.id, 'away');
+  assert.equal(getMarkerTarget(players, 'self', 1), null);
+  assert.equal(getMarkerTarget(players, 'self', null), null);
 });
 
 test('authoritative room cache never regresses to an older combat snapshot', () => {

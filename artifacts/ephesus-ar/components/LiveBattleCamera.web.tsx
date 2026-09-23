@@ -32,6 +32,7 @@ function facingLabel(facing: "front" | "back") {
 
 export default function LiveBattleCamera({
   onFrame,
+  onFlashObservation,
   onStatus,
   restartKey,
   facing,
@@ -42,6 +43,7 @@ export default function LiveBattleCamera({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const onFrameRef = useRef(onFrame);
+  const onFlashObservationRef = useRef(onFlashObservation);
   const onStatusRef = useRef(onStatus);
   const generationRef = useRef(0);
   const playingRef = useRef(false);
@@ -49,6 +51,7 @@ export default function LiveBattleCamera({
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
 
   onFrameRef.current = onFrame;
+  onFlashObservationRef.current = onFlashObservation;
   onStatusRef.current = onStatus;
   viewportRef.current = viewport;
 

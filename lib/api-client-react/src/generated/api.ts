@@ -22,7 +22,6 @@ import type {
 import type {
   BattleJoinInput,
   BattleSession,
-  BattleShotInput,
   BattleShotResult,
   GetBattleStateParams,
   HealthStatus,
@@ -572,78 +571,6 @@ export const useHeartbeatBattleRoom = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getHeartbeatBattleRoomMutationOptions(options));
-    }
-
-export const getFireBattleShotUrl = (code: string,) => {
-
-
-
-
-  return `/api/battle/rooms/${code}/shots`
-}
-
-/**
- * @summary Submit a camera-confirmed shot
- */
-export const fireBattleShot = async (code: string,
-    battleShotInput: BattleShotInput, options?: Parameters<typeof customFetch>[1]): Promise<BattleShotResult> => {
-
-  return customFetch<BattleShotResult>(getFireBattleShotUrl(code),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(battleShotInput)
-  }
-);}
-
-
-
-
-
-export const getFireBattleShotMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof fireBattleShot>>, TError,{code: string;data: BodyType<BattleShotInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof fireBattleShot>>, TError,{code: string;data: BodyType<BattleShotInput>}, TContext> => {
-
-const mutationKey = ['fireBattleShot'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof fireBattleShot>>, {code: string;data: BodyType<BattleShotInput>}> = (props) => {
-          const {code,data} = props ?? {};
-
-          return  fireBattleShot(code,data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type FireBattleShotMutationResult = NonNullable<Awaited<ReturnType<typeof fireBattleShot>>>
-    export type FireBattleShotMutationBody = BodyType<BattleShotInput>
-    export type FireBattleShotMutationError = ErrorType<unknown>
-
-    /**
- * @summary Submit a camera-confirmed shot
- */
-export const useFireBattleShot = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof fireBattleShot>>, TError,{code: string;data: BodyType<BattleShotInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof fireBattleShot>>,
-        TError,
-        {code: string;data: BodyType<BattleShotInput>},
-        TContext
-      > => {
-      return useMutation(getFireBattleShotMutationOptions(options));
     }
 
 export const getFireNetworkBattleShotUrl = (code: string,) => {

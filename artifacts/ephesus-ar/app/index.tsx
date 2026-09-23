@@ -33,7 +33,6 @@ import { setBattleSessionToken } from '@/lib/battle-auth';
 import CreditTopUpPanel from '@/components/CreditTopUpPanel';
 import GoldPurchasePanel from '@/components/GoldPurchasePanel';
 import EconomyGate from '@/components/EconomyGate';
-import CameraPerformanceNotice from '@/components/CameraPerformanceNotice';
 import { economyText, formatUsdFromCents } from '@/lib/economy-ui';
 import type { BattleSession } from '@workspace/api-client-react';
 import {
@@ -764,7 +763,7 @@ export default function Index() {
   }
   if (screen === 'permissions') return <PermissionScreen onContinue={() => setScreen('briefing')} />;
   if (screen === 'briefing') return <BriefingScreen onDone={() => { setOnboarded(true); setScreen('home'); }} />;
-  if (screen === 'camera') return <BattleScreen battleSession={battleSession} onSessionExpired={clearBattleSession} onExit={() => { setBattleSession(null); setScreen('home'); }} />;
+  if (screen === 'camera') return <BattleScreen battleSession={battleSession} onRematch={setBattleSession} onSessionExpired={clearBattleSession} onExit={() => { setBattleSession(null); setScreen('home'); }} />;
   if (screen === 'multiplayer') return <BattleLobbyScreen onSessionExpired={clearBattleSession} onBack={() => { setBattleSession(null); navigateFromMenu('home'); }} onStart={(session) => { setBattleSession(session); setScreen('camera'); }} />;
   if (screen === 'settings') return <SettingsScreen onBack={() => navigateFromMenu('home')} />;
   if (screen === 'armory') return <WeaponSelectionScreen onBack={() => navigateFromMenu('home')} onCamera={() => { setScreen('home'); setSoloGateVisible(true); }} />;
@@ -772,7 +771,6 @@ export default function Index() {
   return (
     <>
       <HomeScreen onNavigate={navigateFromMenu} onOpenCamera={openSoloCamera} onOpenTeamBattle={openTeamBattle} />
-      <CameraPerformanceNotice />
       <EconomyGate
         visible={soloGateVisible}
         action="soloEntry"

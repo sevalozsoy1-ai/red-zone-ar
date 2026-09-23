@@ -66,3 +66,14 @@ test('catalog weapon presses cannot reintroduce touch-time native preloading', a
   assert.doesNotMatch(activeBattleSource, /\bonPrepare\s*=/);
   assert.doesNotMatch(activeBattleSource, /\bprepareWeaponSelection\b|\bAsset\.fromModule\b|\bdownloadAsync\b/);
 });
+
+test('native and web weapon audio hooks expose battle preparation', async () => {
+  const [nativeAudioSource, webAudioSource] = await Promise.all([
+    readFile(new URL('../hooks/useWeaponAudio.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../hooks/useWeaponAudio.web.ts', import.meta.url), 'utf8'),
+  ]);
+
+  for (const source of [nativeAudioSource, webAudioSource]) {
+    assert.match(source, /return \{ playShot, playReload, playTestSound, prepareWeapon, error \}/);
+  }
+});

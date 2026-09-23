@@ -106,16 +106,78 @@ export function detectPlayerMarker(
   for (const player of players) {
     const target = rgb(player.markerColor);
     let score = 0;
+    let minX = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
     for (let y = Math.max(0, centerY - radius); y < Math.min(frame.height, centerY + radius); y += 2) {
       for (let x = Math.max(0, centerX - radius); x < Math.min(frame.width, centerX + radius); x += 2) {
         const offset = (y * frame.width + x) * 4;
         const dr = frame.data[offset] - target.r;
         const dg = frame.data[offset + 1] - target.g;
         const db = frame.data[offset + 2] - target.b;
-        if (dr * dr + dg * dg + db * db < 6800) score += 1;
+        if (dr * dr + dg * dg + db * db < 2600) {
+          score += 1;
+          minX = Math.min(minX, x);
+          maxX = Math.max(maxX, x);
+          minY = Math.min(minY, y);
+          maxY = Math.max(maxY, y);
+        }
       }
     }
-    if (score >= 5 && (!best || score > best.score)) best = { markerId: player.markerId, score };
+    const spanX = maxX - minX;
+    const spanY = maxY - minY;
+    const sampledBounds = Number.isFinite(spanX) && Number.isFinite(spanY)
+      ? (Math.floor(spanX / 2) + 1) * (Math.floor(spanY / 2) + 1)
+      : 0;
+    const density = sampledBounds > 0 ? score / sampledBounds : 0;
+    let outerMatches = 0;
+    let outerSamples = 0;
+    let gapMatches = 0;
+    let gapSamples = 0;
+    let innerMatches = 0;
+    let innerSamples = 0;
+    if (sampledBounds > 0) {
+      const midX = (minX + maxX) / 2;
+      const midY = (minY + maxY) / 2;
+      const halfX = Math.max(1, spanX / 2);
+      const halfY = Math.max(1, spanY / 2);
+      for (let y = minY; y <= maxY; y += 2) {
+        for (let x = minX; x <= maxX; x += 2) {
+          const radial = Math.max(Math.abs((x - midX) / halfX), Math.abs((y - midY) / halfY));
+          const offset = (y * frame.width + x) * 4;
+          const dr = frame.data[offset] - target.r;
+          const dg = frame.data[offset + 1] - target.g;
+          const db = frame.data[offset + 2] - target.b;
+          const matches = dr * dr + dg * dg + db * db < 2600;
+          if (radial >= 0.82) {
+            outerSamples += 1;
+            if (matches) outerMatches += 1;
+          } else if (radial >= 0.66) {
+            gapSamples += 1;
+            if (matches) gapMatches += 1;
+          } else if (radial <= 0.58) {
+            innerSamples += 1;
+            if (matches) innerMatches += 1;
+          }
+        }
+      }
+    }
+    const outerRate = outerSamples ? outerMatches / outerSamples : 0;
+    const gapRate = gapSamples ? gapMatches / gapSamples : 1;
+    const innerRate = innerSamples ? innerMatches / innerSamples : 0;
+    // The rendered player badge has an exact-color outer border and inner
+    // block, separated by a dimmed gap. This topology rejects televisions and
+    // arbitrary textured regions that merely contain the assigned color.
+    const markerShaped = score >= 8
+      && spanX >= 6
+      && spanY >= 6
+      && density >= 0.15
+      && density <= 0.97
+      && outerRate >= 0.15
+      && innerRate >= 0.2
+      && gapRate <= 0.35;
+    if (markerShaped && (!best || score > best.score)) best = { markerId: player.markerId, score };
   }
   return best?.markerId ?? null;
 }

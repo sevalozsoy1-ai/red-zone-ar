@@ -14,8 +14,6 @@ export * from './battlePlayer';
 export * from './battleRoom';
 export * from './battleRoomStatus';
 export * from './battleSession';
-export * from './battleShotInput';
-export * from './battleShotInputFireMode';
 export * from './battleShotResult';
 export * from './getBattleStateParams';
 export * from './healthStatus';

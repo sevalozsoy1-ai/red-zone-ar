@@ -282,72 +282,6 @@ export const HeartbeatBattleRoomResponse = zod.object({
 
 
 /**
- * @summary Submit a camera-confirmed shot
- */
-export const fireBattleShotPathCodeRegExp = new RegExp('^[A-Z0-9]{6}$');
-
-
-export const FireBattleShotParams = zod.object({
-  "code": zod.coerce.string().regex(fireBattleShotPathCodeRegExp)
-})
-
-export const fireBattleShotBodyMarkerIdMin = 0;
-export const fireBattleShotBodyMarkerIdMax = 9;
-
-export const fireBattleShotBodyWeaponIdMax = 32;
-
-
-
-export const FireBattleShotBody = zod.object({
-  "markerId": zod.number().int().min(fireBattleShotBodyMarkerIdMin).max(fireBattleShotBodyMarkerIdMax),
-  "firedAt": zod.number().int(),
-  "weaponId": zod.string().min(1).max(fireBattleShotBodyWeaponIdMax),
-  "fireMode": zod.enum(['primary', 'throw'])
-})
-
-export const fireBattleShotResponseDamageMin = 0;
-
-export const fireBattleShotResponseRoomPlayersItemHpMin = 0;
-export const fireBattleShotResponseRoomPlayersItemHpMax = 100;
-
-
-
-export const FireBattleShotResponse = zod.object({
-  "accepted": zod.boolean(),
-  "reason": zod.string(),
-  "shooterId": zod.string(),
-  "targetId": zod.string(),
-  "damage": zod.number().int().min(fireBattleShotResponseDamageMin),
-  "eliminated": zod.boolean(),
-  "room": zod.object({
-  "code": zod.string(),
-  "status": zod.enum(['lobby', 'active', 'finished']),
-  "winnerPlayerId": zod.string().nullable(),
-  "draw": zod.boolean(),
-  "players": zod.array(zod.object({
-  "id": zod.string(),
-  "name": zod.string(),
-  "markerId": zod.number().int(),
-  "markerColor": zod.string(),
-  "lives": zod.number().int(),
-  "hp": zod.number().int().min(fireBattleShotResponseRoomPlayersItemHpMin).max(fireBattleShotResponseRoomPlayersItemHpMax),
-  "alive": zod.boolean(),
-  "respawnAt": zod.number().int(),
-  "isHost": zod.boolean(),
-  "connected": zod.boolean()
-})),
-  "effects": zod.array(zod.object({
-  "id": zod.string(),
-  "kind": zod.enum(['frag', 'flashbang', 'smoke']),
-  "expiresAt": zod.number().int()
-})),
-  "maxPlayers": zod.number().int(),
-  "updatedAt": zod.number().int()
-})
-})
-
-
-/**
  * @summary Submit an idempotent player-targeted network shot
  */
 export const fireNetworkBattleShotPathCodeRegExp = new RegExp('^[A-Z0-9]{6}$');
@@ -414,7 +348,8 @@ export const FireNetworkBattleShotResponse = zod.object({
 })),
   "maxPlayers": zod.number().int(),
   "updatedAt": zod.number().int()
-})
+}),
+  "pending": zod.boolean().optional()
 })
 
 

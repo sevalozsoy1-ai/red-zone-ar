@@ -10,6 +10,7 @@ import type { LiveBattleCameraProps } from "./camera-types";
 import {
   canCommitTorchTimeout,
   canPulseCameraTorch,
+  FLASH_PULSE_DURATION_MS,
   invalidateCameraTorch,
   isPostMountFireSignal,
 } from "@/lib/camera-torch";
@@ -43,7 +44,7 @@ function base64ToBytes(base64: string): Uint8Array {
 
 export default function LiveBattleCamera({
   onFrame,
-  onBarcodeScanned,
+  onFlashObservation,
   onStatus,
   restartKey,
   facing,
@@ -54,6 +55,7 @@ export default function LiveBattleCamera({
   const { locale, t } = useI18n();
   const cameraRef = useRef<CameraView | null>(null);
   const onFrameRef = useRef(onFrame);
+  const onFlashObservationRef = useRef(onFlashObservation);
   const onStatusRef = useRef(onStatus);
   const mountedRef = useRef(true);
   const readyRef = useRef(false);
@@ -77,8 +79,11 @@ export default function LiveBattleCamera({
   const torchGenerationRef = useRef(0);
   const torchLifecycleRef = useRef({ generation: 0, enabled: false });
   const lastFireSignalRef = useRef<number | undefined>(fireSignal);
+  const luminanceBaselineRef = useRef<number | null>(null);
+  const lastFlashObservationAtRef = useRef(0);
 
   onFrameRef.current = onFrame;
+  onFlashObservationRef.current = onFlashObservation;
   onStatusRef.current = onStatus;
 
   const invalidateTorch = useCallback(() => {
@@ -116,7 +121,8 @@ export default function LiveBattleCamera({
         } catch {
           // Some camera HALs throw while changing torch state during teardown.
         }
-      }, 90);
+      // A brief shot cue; no camera-analysis frame needs to capture this.
+      }, FLASH_PULSE_DURATION_MS);
     } catch {
       setTorchEnabled(false);
     }
@@ -227,6 +233,29 @@ export default function LiveBattleCamera({
         formatAsRGBA: true,
       });
       if (mountedRef.current && activeRef.current && generation === generationRef.current) {
+        let luminanceTotal = 0;
+        const pixelCount = decoded.width * decoded.height;
+        const stride = Math.max(1, Math.floor(pixelCount / 1800));
+        let samples = 0;
+        for (let pixel = 0; pixel < pixelCount; pixel += stride) {
+          const offset = pixel * 4;
+          luminanceTotal += decoded.data[offset] * 0.2126
+            + decoded.data[offset + 1] * 0.7152
+            + decoded.data[offset + 2] * 0.0722;
+          samples += 1;
+        }
+        const luminance = samples > 0 ? luminanceTotal / samples : 0;
+        const baseline = luminanceBaselineRef.current;
+        if (baseline !== null) {
+          const increase = luminance - baseline;
+          const confidence = Math.max(0, Math.min(1, increase / 35));
+          const observedAt = Date.now();
+          if (confidence >= 0.65 && observedAt - lastFlashObservationAtRef.current >= 700) {
+            lastFlashObservationAtRef.current = observedAt;
+            onFlashObservationRef.current?.({ observedAt, confidence });
+          }
+        }
+        luminanceBaselineRef.current = baseline === null ? luminance : baseline * 0.88 + luminance * 0.12;
         onFrameRef.current?.({
           width: decoded.width,
           height: decoded.height,
@@ -384,8 +413,6 @@ export default function LiveBattleCamera({
            // only after layout/readiness and never changes with the profile.
           autofocus={Platform.OS === "android" ? "on" : "off"}
            pictureSize={pictureSize}
-          barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-          onBarcodeScanned={onBarcodeScanned}
           animateShutter={false}
           onCameraReady={() => {
             const generation = generationRef.current;

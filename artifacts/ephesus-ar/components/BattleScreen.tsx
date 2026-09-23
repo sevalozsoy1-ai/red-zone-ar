@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Feather } from '@expo/vector-icons';
+import * as Crypto from 'expo-crypto';
 import { useKeepAwake } from 'expo-keep-awake';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LiveBattleCamera from './LiveBattleCamera';
+import BeaconCamera from './BeaconCamera';
 import type { CameraStatus } from './camera-types';
 import { useColors } from '@/hooks/useColors';
 import { useI18n } from '@/hooks/useI18n';
@@ -25,6 +27,7 @@ import {
   getGetBattleStateQueryKey,
   useFireNetworkBattleShot,
   useHeartbeatBattleRoom,
+  useJoinBattleRoom,
   useGetBattleState,
   useLeaveBattleRoom,
   type BattleSession,
@@ -33,9 +36,8 @@ import type { VisionMode } from '@/lib/vision-modes';
 import PlayerMarker from './PlayerMarker';
 import { weaponActionLabel, weaponCategoryLabel, uiText } from '@/lib/i18n';
 import { rtlLayout } from '@/lib/rtl';
-import { battleHudStatus, isBattleCombatDisabled, isGoneBattleSession, shouldApplyBattleSnapshot } from '@/lib/battle-ui';
+import { getMarkerTarget, isBattleCombatDisabled, isGoneBattleSession, shouldApplyBattleSnapshot } from '@/lib/battle-ui';
 import { setBattleSessionToken } from '@/lib/battle-auth';
-import { getEligibleQrTarget, getQrTargetMode, isQrWithinExpandedHitRegion, parseTargetPayload } from '@/lib/qr-target';
 import { economyText, formatUsdFromCents } from '@/lib/economy-ui';
 import {
   createMatchMagazineInventory,
@@ -49,6 +51,9 @@ import { battleSessionCopy } from '@/lib/battle-session-copy';
 import { handleBattleAppStateChange, handleBattleHardwareBack } from '@/lib/battle-session-lifecycle';
 import { createShotId, useBattleSocket } from '@/lib/battle-socket';
 import { applyBattleWeaponSelection } from '@/lib/battle-weapon-selection';
+import { createMarkerLockState, detectPlayerMarker, updateMarkerAuthorization } from '@/lib/marker-detection';
+
+const CAMERA_TARGET_FRESHNESS_MS = 1750;
 
 const HEAVY_COOLDOWN_MS: Partial<Record<WeaponId, number>> = {
   m249: 1100,
@@ -73,12 +78,17 @@ export default function BattleScreen({
   onExit,
   battleSession,
   onSessionExpired,
+  onRematch,
 }: {
   onExit: () => void;
   battleSession?: BattleSession | null;
   onSessionExpired?: () => void;
+  onRematch?: (session: BattleSession) => void;
 }) {
-  useKeepAwake();
+  // React Strict Mode mounts and immediately cleans up effects once in the web
+  // preview. The browser wake-lock promise may not have activated by cleanup,
+  // so suppress only that expected deactivation race.
+  useKeepAwake(undefined, { suppressDeactivateWarnings: true });
   const colors = useColors();
   const { locale, t, rtl } = useI18n();
   const insets = useSafeAreaInsets();
@@ -86,7 +96,6 @@ export default function BattleScreen({
   const [status, setStatus] = useState<CameraStatus>({ state: 'requesting', message: t('cameraHint') });
   const [restartKey, setRestartKey] = useState(0);
   const [fireSignal, setFireSignal] = useState(0);
-  const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('back');
   const [visionMode, setVisionMode] = useState<VisionMode>('normal');
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
   const [sessionExpired, setSessionExpired] = useState(false);
@@ -129,15 +138,7 @@ export default function BattleScreen({
   });
   const room = roomQuery.data?.room ?? battleSession?.room;
   const ownPlayer = room?.players.find((player) => player.id === battleSession?.playerId);
-  const [detectedMarkerId, setDetectedMarkerId] = useState<number | null>(null);
-  const detectedMarkerRef = useRef<number | null>(null);
-  const qrObservationRef = useRef<{ markerId: number; observedAt: number } | null>(null);
   const [clock, setClock] = useState(Date.now());
-  const clearDetectedTarget = useCallback(() => {
-    qrObservationRef.current = null;
-    detectedMarkerRef.current = null;
-    setDetectedMarkerId(null);
-  }, []);
   const networkSocket = useBattleSocket(
     battleSession ? { roomCode: battleSession.room.code, sessionToken: battleSession.sessionToken } : null,
     !!battleSession && appActive && !sessionExpired,
@@ -153,41 +154,14 @@ export default function BattleScreen({
     adOpen: false,
     reloading: false,
   });
-  const retainedQrTarget = qrObservationRef.current
-    ? getEligibleQrTarget(room?.players, ownPlayer?.id, qrObservationRef.current.markerId)
-    : null;
   const eligibleOpponents = room?.players.filter((player) =>
     player.id !== ownPlayer?.id && player.alive && player.markerId >= 0,
   ) ?? [];
-  // A QR observation selects a target and remains useful after the camera
-  // briefly loses focus. Automatic selection is deliberately only allowed
-  // when there is exactly one eligible opponent; never guess in a larger room.
-  const automaticTarget = retainedQrTarget ? null : eligibleOpponents.length === 1
-    ? eligibleOpponents[0]
-    : null;
-  const networkTarget = retainedQrTarget ?? automaticTarget;
-  const targetMode = getQrTargetMode({
-    observedAt: qrObservationRef.current?.observedAt,
-    now: clock,
-    hasRetainedTarget: !!retainedQrTarget,
-    hasAutomaticTarget: !!automaticTarget,
-  });
-  const targetStatusKey = targetMode === 'fresh'
-    ? 'qrFreshTarget'
-    : targetMode === 'retained'
-      ? 'qrRetainedLock'
-      : targetMode === 'automatic'
-        ? 'qrAutomaticTarget'
-        : 'qrNoTarget';
-  useEffect(() => {
-    if (
-      qrObservationRef.current
-      && !getEligibleQrTarget(room?.players, ownPlayer?.id, qrObservationRef.current.markerId)
-    ) {
-      clearDetectedTarget();
-    }
-  }, [clearDetectedTarget, ownPlayer?.id, room?.players]);
-  const hasValidAimedTarget = combatReady && networkTarget !== null;
+  const markerAuthorizationRef = useRef(createMarkerLockState());
+  const cameraTargetRef = useRef<{ playerId: string; observedAt: number } | null>(null);
+  const lastBeaconObservationAtRef = useRef(0);
+  const [cameraTargetId, setCameraTargetId] = useState<string | null>(null);
+  const hasValidAimedTarget = combatReady && cameraTargetId !== null;
   const [combatFlash, setCombatFlash] = useState<'hit' | 'hurt' | null>(null);
   const [shotMessage, setShotMessage] = useState('');
   const previousHealthRef = useRef<{ hp: number; lives: number } | null>(null);
@@ -205,8 +179,8 @@ export default function BattleScreen({
     setSelectedWeapon,
     activeGold,
     creditCents,
-    flashlightEnabled,
     musicEnabled,
+    flashlightEnabled,
     setAudioPreferences,
   } = useGame();
   const { playShot, playReload, playTestSound, prepareWeapon, error } = useWeaponAudio();
@@ -220,6 +194,7 @@ export default function BattleScreen({
   const [pickerVisible, setPickerVisible] = useState(false);
   const [knifeThrowTarget, setKnifeThrowTarget] = useState({ x: 0, y: 0 });
   const [leaveError, setLeaveError] = useState('');
+  const [rematchError, setRematchError] = useState('');
   const combatControlsDisabled = isBattleCombatDisabled({
     hasBattleSession: !!battleSession && !sessionExpired,
     roomStatus: room?.status,
@@ -268,7 +243,9 @@ export default function BattleScreen({
     if (nextIdentity !== sessionIdentityRef.current) {
       networkPendingRef.current.clear();
       seenNetworkHitIdsRef.current.clear();
-      clearDetectedTarget();
+      markerAuthorizationRef.current = createMarkerLockState();
+      cameraTargetRef.current = null;
+      setCameraTargetId(null);
       suppressNextHealthFlashRef.current = false;
       if (suppressHealthFlashTimeoutRef.current) clearTimeout(suppressHealthFlashTimeoutRef.current);
       suppressHealthFlashTimeoutRef.current = null;
@@ -280,13 +257,17 @@ export default function BattleScreen({
       setSessionExpired(false);
     }
     sessionTokenRef.current = battleSession?.sessionToken;
-  }, [battleSession?.playerId, battleSession?.room.code, battleSession?.sessionToken, clearDetectedTarget]);
+  }, [battleSession?.playerId, battleSession?.room.code, battleSession?.sessionToken]);
 
   useEffect(() => {
-    clearDetectedTarget();
-  }, [appActive, cameraFacing, clearDetectedTarget, live, restartKey]);
+    if (battleSession && appActive && !sessionExpired && ownPlayer?.alive) return;
+    markerAuthorizationRef.current = createMarkerLockState();
+    cameraTargetRef.current = null;
+    setCameraTargetId(null);
+  }, [appActive, battleSession?.playerId, battleSession?.sessionToken, ownPlayer?.alive, sessionExpired]);
 
-  const handleSessionExpired = useCallback(() => {
+  const handleSessionExpired = useCallback((expectedToken?: string) => {
+    if (expectedToken && sessionTokenRef.current !== expectedToken) return;
     if (sessionExpiredRef.current) return;
     sessionExpiredRef.current = true;
     setSessionExpired(true);
@@ -307,13 +288,14 @@ export default function BattleScreen({
 
   useEffect(() => {
     if (!battleSession || sessionExpired) return;
+    const expectedToken = battleSession.sessionToken;
     const beat = () => {
       if (AppState.currentState !== 'active' || heartbeatRef.current.isPending) return;
       heartbeatRef.current.mutate(
         { code: battleSession.room.code },
         {
           onError: (requestError) => {
-            if (isGoneBattleSession(requestError)) handleSessionExpired();
+            if (isGoneBattleSession(requestError)) handleSessionExpired(expectedToken);
           },
         },
       );
@@ -424,7 +406,7 @@ export default function BattleScreen({
           cancelQueries: (filters) => queryClient.cancelQueries(filters),
           refetch: roomQuery.refetch,
           isExpiredError: isGoneBattleSession,
-          onExpired: handleSessionExpired,
+          onExpired: () => handleSessionExpired(battleSession?.sessionToken),
           onBackground: stopActions,
         });
       };
@@ -539,7 +521,7 @@ export default function BattleScreen({
 
   useEffect(() => {
     if (!battleSession || sessionExpired || !isGoneBattleSession(roomQuery.error)) return;
-    handleSessionExpired();
+    handleSessionExpired(battleSession.sessionToken);
   }, [battleSession, handleSessionExpired, roomQuery.error, sessionExpired]);
 
   const handleWeaponSelect = (id: WeaponId) => {
@@ -574,7 +556,11 @@ export default function BattleScreen({
     const hasKnifeInventory = activeGoldRef.current || w.id !== 'knife' || ammoRef.current > 0;
     const hasAmmo = activeGoldRef.current || (w.id === 'knife' ? hasKnifeInventory : ammoRef.current > 0);
     if (knifeThrowRunningRef.current || !isLiveRef.current || showAdRef.current || reloadingRef.current || !hasAmmo || now - lastFireTimeRef.current < cooldown) return false;
-    const networkTargetAtFire = networkTarget;
+    const cameraTargetAtFire = cameraTargetRef.current;
+    const networkTargetAtFire = cameraTargetAtFire
+      && now - cameraTargetAtFire.observedAt <= CAMERA_TARGET_FRESHNESS_MS
+      ? eligibleOpponents.find((player) => player.id === cameraTargetAtFire.playerId) ?? null
+      : null;
     lastFireTimeRef.current = now;
     // This is intentionally after all local fire guards. The camera component
     // treats the torch as an optional visual aid and safely ignores unsupported
@@ -635,8 +621,8 @@ export default function BattleScreen({
           };
         });
         if (result.accepted) {
-          setShotMessage('Vuruş onaylandı');
-          if (!sentViaSocket) showFlash('hit');
+          setShotMessage(result.pending ? 'Hedefin kamera onayı bekleniyor' : 'Vuruş onaylandı');
+          if (!result.pending && !sentViaSocket) showFlash('hit');
         } else {
           setShotMessage(result.reason || 'Vuruş reddedildi');
         }
@@ -654,6 +640,35 @@ export default function BattleScreen({
   fireOneRef.current = fireOne;
 
   const leave = useLeaveBattleRoom({ request: authRequest });
+  const rematch = useJoinBattleRoom({ request: authRequest });
+
+  const restartMatch = async () => {
+    if (!battleSession || !ownPlayer || rematch.isPending) return;
+    stopActions();
+    setRematchError('');
+    try {
+      const next = await rematch.mutateAsync({
+        code: battleSession.room.code,
+        data: {
+          name: ownPlayer.name,
+          requestId: `rematch-${Crypto.randomUUID()}`,
+        },
+      } as Parameters<typeof rematch.mutateAsync>[0]);
+      queryClient.removeQueries({ queryKey: roomQueryKey, exact: true });
+      setBattleSessionToken(next.sessionToken);
+      sessionTokenRef.current = next.sessionToken;
+      queryClient.setQueryData(
+        ['/api/battle/state', next.room.code, next.sessionToken],
+        next,
+      );
+      cameraTargetRef.current = null;
+      markerAuthorizationRef.current = createMarkerLockState();
+      setCameraTargetId(null);
+      onRematch?.(next);
+    } catch {
+      setRematchError(`${t('errorMessage')} · ${t('tryAgain')}`);
+    }
+  };
 
   const exitBattle = () => {
     if (!appActiveRef.current) return;
@@ -847,13 +862,6 @@ export default function BattleScreen({
   const weaponAction = getWeaponAction(w);
   const targetedEffect = room?.effects?.find((effect) => effect.expiresAt > clock) ?? null;
   const isScopedWeapon = w.zoom >= 2;
-  const hudStatus = battleHudStatus({
-    hasBattleSession: !!battleSession && !sessionExpired,
-    roomStatus: room?.status,
-    roomError: roomQuery.isError || sessionExpired || !appActive,
-    cameraLive: live && appActive,
-    hasActiveOpponent: hasValidAimedTarget,
-  });
   
   // The aim value remains at zero, so zooming always stays centered.
   const camTranslateX = Animated.multiply(aimAnim.x, Animated.subtract(1, zoomAnim));
@@ -861,44 +869,71 @@ export default function BattleScreen({
 
   return (
     <View style={[s.root, rtl && s.rtl, { backgroundColor: colors.background }]} testID="battle-screen">
-      <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ translateX: camTranslateX }, { translateY: camTranslateY }] }]}>
-        <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ scale: zoomAnim }] }]}>
-          <LiveBattleCamera
+      {battleSession ? <BeaconCamera
+             ownBeaconId={ownPlayer?.markerId ?? -1}
+             enabled={!!ownPlayer?.alive && appActive && !sessionExpired}
+              zoomRatio={isScopeActive && isScopedWeapon ? w.zoom : 1}
+              onBeaconDetected={(detectedMarkerId, confidence) => {
+              const observedAt = Date.now();
+              const authorizedMarkerId = updateMarkerAuthorization(
+                markerAuthorizationRef.current,
+                detectedMarkerId,
+                observedAt,
+                 { consecutiveFrames: 2 },
+              );
+              const target = getMarkerTarget(
+                room?.players ?? [],
+                ownPlayer?.id,
+                authorizedMarkerId,
+              );
+              cameraTargetRef.current = target
+                ? { playerId: target.id, observedAt }
+                : null;
+              setCameraTargetId(target?.id ?? null);
+               if (target && authorizedMarkerId === detectedMarkerId
+                 && observedAt - lastBeaconObservationAtRef.current >= 450) {
+                 lastBeaconObservationAtRef.current = observedAt;
+                 networkSocket.sendFlashObservation({
+                   observedAt,
+                   confidence,
+                   shooterBeaconId: detectedMarkerId,
+                 });
+               }
+            }}
             onStatus={setStatus}
             restartKey={restartKey}
-            fireSignal={fireSignal}
-            flashlightEnabled={flashlightEnabled}
-            facing={cameraFacing}
-             onBarcodeScanned={(result) => {
-              if (!room || !ownPlayer) {
-                clearDetectedTarget();
-                return;
-              }
-               const markerId = parseTargetPayload(result.data);
-               const now = Date.now();
-               const target = getEligibleQrTarget(room.players, ownPlayer.id, markerId);
-               const centered = isQrWithinExpandedHitRegion(
-                 { cornerPoints: result.cornerPoints, bounds: result.bounds },
+           /> : <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ translateX: camTranslateX }, { translateY: camTranslateY }] }]}>
+          <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ scale: zoomAnim }] }]}>
+            <LiveBattleCamera
+             onFrame={(frame) => {
+               const observedAt = Date.now();
+               const detectedMarkerId = detectPlayerMarker(
+                 frame,
+                 eligibleOpponents,
+                 { x: 0, y: 0 },
                  { width, height },
                );
-               // Invalid/temporarily out-of-frame scans must not erase the
-               // last valid selection. A later room snapshot invalidates it
-               // automatically when the player dies or leaves.
-               if (markerId === null || !target || !centered) return;
-               qrObservationRef.current = { markerId, observedAt: now };
-               detectedMarkerRef.current = markerId;
-               setDetectedMarkerId(markerId);
-            }}
-            onFacingUnavailable={(failedFacing) => {
-              if (failedFacing === 'back') {
-                stopActions();
-                setCameraFacing('front');
-                setRestartKey((key) => key + 1);
-              }
-            }}
-          />
-        </Animated.View>
-      </Animated.View>
+               const authorizedMarkerId = updateMarkerAuthorization(
+                 markerAuthorizationRef.current,
+                 detectedMarkerId,
+                 observedAt,
+               );
+               const target = getMarkerTarget(
+                 room?.players ?? [],
+                 ownPlayer?.id,
+                 authorizedMarkerId,
+               );
+               cameraTargetRef.current = target ? { playerId: target.id, observedAt } : null;
+               setCameraTargetId(target?.id ?? null);
+             }}
+             onStatus={setStatus}
+             restartKey={restartKey}
+             fireSignal={fireSignal}
+             flashlightEnabled={flashlightEnabled}
+             facing="back"
+            />
+          </Animated.View>
+        </Animated.View>}
 
       <VisionModeOverlay mode={visionMode} />
       <ScopeOverlay
@@ -947,7 +982,16 @@ export default function BattleScreen({
 
            <View style={s.topCenter}>
                {ownPlayer ? <Text testID="battle-player-name" numberOfLines={1} style={[s.playerNameHud, { color: colors.foreground }]}>{ownPlayer.name}</Text> : null}
-              {battleSession ? <Text testID="battle-room-code" selectable style={[s.serverStatus, { color: colors.cyan }]}>{uiText(locale, 'roomCode')}: {battleSession.room.code}</Text> : null}
+              {battleSession ? (
+                <Text testID="battle-room-code" selectable style={[s.serverStatus, { color: colors.cyan }]}>
+                  {uiText(locale, 'roomCode')}: {battleSession.room.code}
+                </Text>
+              ) : null}
+               {battleSession && Platform.OS === 'android' && live ? (
+                 <Text testID="battle-camera-diagnostics" numberOfLines={2} style={[s.serverStatus, { color: colors.amber, fontSize: 9 }]}>
+                   {status.message}
+                 </Text>
+               ) : null}
               {error ? <Text numberOfLines={1} style={s.errorText} testID="error-text">{error}</Text> : null}
                 {battleSession && roomQuery.isError ? <Text numberOfLines={1} style={s.errorText} testID="battle-room-error">{t('errorMessage')}</Text> : null}
                 {leaveError ? (
@@ -956,50 +1000,6 @@ export default function BattleScreen({
                     <Pressable testID="retry-leave-btn" disabled={leave.isPending} onPress={exitBattle} style={[s.retryLeave, leave.isPending && s.disabledBtn]}>
                       <Text style={s.retryLeaveText}>{t('tryAgain')}</Text>
                     </Pressable>
-                  </View>
-                ) : null}
-                {battleSession ? (
-                  <Text
-                    numberOfLines={1}
-                    testID="battle-status-hud"
-                    style={[s.serverStatus, { color: hudStatus === 'ready' ? colors.cyan : colors.mutedForeground }]}
-                  >
-                    {hudStatus === 'error'
-                      ? t('errorMessage')
-                      : hudStatus === 'finished'
-                        ? t('teamBattle')
-                        : hudStatus === 'camera'
-                          ? uiText(locale, 'cameraUnavailableTitle')
-                      : hudStatus === 'waiting'
-                            ? t('ready')
-                            : hudStatus === 'ready'
-                              ? t('ready')
-                              : t('ready')}
-                  </Text>
-                ) : null}
-                {battleSession ? (
-                  <View style={{ alignItems: 'center', maxWidth: 220 }}>
-                    <Text
-                      testID="battle-target-status"
-                      numberOfLines={1}
-                      style={[s.serverStatus, { color: hasValidAimedTarget ? colors.signal : colors.mutedForeground }]}
-                    >
-                      {t(targetStatusKey)}
-                    </Text>
-                    <Text numberOfLines={2} style={[s.serverStatus, { color: colors.mutedForeground, textAlign: 'center' }]}>
-                      {t('qrTargetHelp')}
-                    </Text>
-                    {eligibleOpponents.length > 1 && networkTarget ? (
-                      <Pressable
-                        testID="battle-clear-target"
-                        accessibilityRole="button"
-                        accessibilityLabel={t('qrClearTarget')}
-                        onPress={clearDetectedTarget}
-                        style={{ paddingHorizontal: 8, paddingVertical: 3 }}
-                      >
-                        <Text style={{ color: colors.amber, fontSize: 11, fontWeight: '700' }}>{t('qrClearTarget')}</Text>
-                      </Pressable>
-                    ) : null}
                   </View>
                 ) : null}
             </View>
@@ -1016,16 +1016,6 @@ export default function BattleScreen({
                    >
                      <Feather name={musicEnabled ? 'music' : 'volume-x'} size={16} color={musicEnabled ? colors.cyan : colors.mutedForeground} />
                    </Pressable>
-                   <Pressable
-                     testID="battle-flashlight-toggle"
-                     accessibilityRole="switch"
-                     accessibilityLabel={flashlightEnabled ? t('flashlightOn') : t('flashlightOff')}
-                     accessibilityState={{ checked: flashlightEnabled }}
-                     onPress={() => setAudioPreferences({ flashlightEnabled: !flashlightEnabled })}
-                     style={[s.close, { backgroundColor: colors.overlay }]}
-                   >
-                     <Feather name="zap" size={16} color={flashlightEnabled ? colors.amber : colors.mutedForeground} />
-                   </Pressable>
                  </View>
                 <View style={s.creditHud}>
                   <Feather name={activeGold ? 'award' : 'zap'} size={12} color={activeGold ? '#ffd700' : '#72f1d0'} />
@@ -1033,12 +1023,7 @@ export default function BattleScreen({
                 </View>
              <VisionModeControl
                activeMode={visionMode}
-               cameraFacing={cameraFacing}
-               onFlipCamera={() => {
-                 stopActions();
-                 setCameraFacing((current) => current === 'back' ? 'front' : 'back');
-                 setRestartKey((key) => key + 1);
-               }}
+                cameraFacing="back"
                onTestSound={() => playTestSound(selectedWeapon)}
                onModeChange={(nextMode) => {
                  stopActions();
@@ -1144,9 +1129,9 @@ export default function BattleScreen({
       {combatFlash && <View pointerEvents="none" testID={`${combatFlash}-flash`} style={[StyleSheet.absoluteFill, s.combatFlash, { backgroundColor: combatFlash === 'hit' ? 'rgba(48,209,88,0.42)' : 'rgba(255,45,85,0.52)' }]} />}
       {battleSession && ownPlayer && !ownPlayer.alive && ownPlayer.lives > 0 && (
         <View style={s.respawnLayer} pointerEvents="none">
-           <Text style={s.respawnTitle}>{t('errorMessage')}</Text>
+           <Text style={s.respawnTitle}>{t('waiting')}</Text>
           <Text style={s.respawnCount}>{Math.max(0, Math.ceil((ownPlayer.respawnAt - clock) / 1000))}</Text>
-           <Text style={s.respawnText}>{t('waiting')}</Text>
+           <Text style={s.respawnText}>{t('ready')}</Text>
         </View>
       )}
       {battleSession && room?.status === 'finished' && (
@@ -1157,6 +1142,17 @@ export default function BattleScreen({
                ? t('teamBattle')
                 : `${uiText(locale, 'winner')}: ${room.players.find((player) => player.id === room.winnerPlayerId)?.name ?? t('players')}`}
            </Text>
+            <Pressable
+              testID="battle-rematch"
+              disabled={rematch.isPending}
+              onPress={restartMatch}
+              style={[s.button, { backgroundColor: colors.signal, marginTop: 20, width: 240 }, rematch.isPending && s.disabledBtn]}
+            >
+              {rematch.isPending
+                ? <ActivityIndicator color={colors.ink} />
+                : <Text style={{ color: colors.ink, fontWeight: '900' }}>{t('tryAgain')}</Text>}
+            </Pressable>
+            {rematchError ? <Text style={[s.message, { color: colors.amber, marginTop: 10 }]}>{rematchError}</Text> : null}
            <Pressable disabled={leave.isPending} onPress={exitBattle} style={[s.button, { backgroundColor: colors.cyan, marginTop: 20, width: 240 }, leave.isPending && s.disabledBtn]}><Text style={{ color: colors.ink, fontWeight: '900' }}>{t('home')}</Text></Pressable>
         </View>
       )}
@@ -1167,7 +1163,7 @@ export default function BattleScreen({
           {status.state === 'requesting' ? <ActivityIndicator color={colors.cyan} /> : <Feather name="camera-off" size={30} color={colors.amber} />}
            <Text style={[s.title, { color: colors.foreground }]}>{status.state === 'requesting' ? t('cameraHint') : status.state === 'paused' ? t('waiting') : uiText(locale, 'cameraUnavailableTitle')}</Text>
           <Text style={[s.message, { color: colors.mutedForeground }]}>{status.message}</Text>
-          {status.state !== 'requesting' && <>
+          {status.state !== 'requesting' && status.state !== 'unsupported' && <>
             <Pressable onPress={() => setRestartKey(key => key + 1)} style={[s.button, { backgroundColor: colors.cyan }]}>
                <Text style={{ color: colors.ink, fontWeight: '700' }}>{t('openCamera')} · {t('tryAgain')}</Text>
             </Pressable>
@@ -1218,7 +1214,6 @@ export default function BattleScreen({
   const { width, height } = useWindowDimensions();
   const [status, setStatus] = useState<CameraStatus>({ state: 'requesting', message: t('cameraHint') });
   const [restartKey, setRestartKey] = useState(0);
-  const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('back');
   const [visionMode, setVisionMode] = useState<VisionMode>('normal');
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
   const [sessionExpired, setSessionExpired] = useState(false);
@@ -1249,6 +1244,7 @@ export default function BattleScreen({
     reloading: false,
   });
   const [detectedMarkerId, setDetectedMarkerId] = useState<number | null>(null);
+  const markerAuthorizationRef = useRef(createMarkerLockState());
   const [combatFlash, setCombatFlash] = useState<'hit' | 'hurt' | null>(null);
   const [shotMessage, setShotMessage] = useState('');
   const [clock, setClock] = useState(Date.now());
@@ -1337,7 +1333,7 @@ export default function BattleScreen({
 
   useEffect(() => {
     if (!battleSession || sessionExpired || !isGoneBattleSession(roomQuery.error)) return;
-    handleSessionExpired();
+    handleSessionExpired(battleSession.sessionToken);
   }, [battleSession, handleSessionExpired, roomQuery.error, sessionExpired]);
 
   useEffect(() => { isLiveRef.current = combatReady; }, [combatReady]);
@@ -1734,30 +1730,27 @@ export default function BattleScreen({
     <View style={[s.root, rtl && s.rtl, { backgroundColor: colors.background }]} testID="battle-screen">
       <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ translateX: camTranslateX }, { translateY: camTranslateY }] }]}>
         <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ scale: zoomAnim }] }]}>
-          <LiveBattleCamera
+          <BeaconCamera
+            ownBeaconId={ownPlayer?.markerId ?? -1}
+            enabled={!!battleSession && !!ownPlayer?.alive && appActive && !sessionExpired}
             onStatus={setStatus}
             restartKey={restartKey}
-            facing={cameraFacing}
-            onFacingUnavailable={(failedFacing) => {
-              if (failedFacing === 'back') {
-                stopActions();
-                setCameraFacing('front');
-                setRestartKey((key) => key + 1);
-              }
-            }}
-            onFrame={(frame) => {
+            onBeaconDetected={(decodedMarkerId) => {
               if (!room || !ownPlayer) return;
-              const markerId = detectPlayerMarker(
-                frame,
-               room.players.filter((player) =>
-                 player.id !== ownPlayer.id
-                 && player.alive,
-               ),
-                aimValue.current,
-                { width, height },
+              const opponentIds = new Set(
+                room.players
+                  .filter((player) => player.id !== ownPlayer.id && player.alive)
+                  .map((player) => player.markerId),
               );
-               detectedMarkerRef.current = markerId;
-               setDetectedMarkerId((current) => current === markerId ? current : markerId);
+              const candidate = opponentIds.has(decodedMarkerId) ? decodedMarkerId : null;
+              const authorizedMarkerId = updateMarkerAuthorization(
+                markerAuthorizationRef.current,
+                candidate,
+                Date.now(),
+                { consecutiveFrames: 2 },
+              );
+              detectedMarkerRef.current = authorizedMarkerId;
+              setDetectedMarkerId((current) => current === authorizedMarkerId ? current : authorizedMarkerId);
             }}
           />
         </Animated.View>
@@ -1836,12 +1829,7 @@ export default function BattleScreen({
              </Pressable>}
              <VisionModeControl
                activeMode={visionMode}
-               cameraFacing={cameraFacing}
-               onFlipCamera={() => {
-                 stopActions();
-                 setCameraFacing((current) => current === 'back' ? 'front' : 'back');
-                 setRestartKey((key) => key + 1);
-               }}
+                cameraFacing="back"
                onTestSound={() => playTestSound(selectedWeapon)}
                onModeChange={(nextMode) => {
                  stopActions();

@@ -16,4 +16,5 @@ export interface BattleShotResult {
   damage: number;
   eliminated: boolean;
   room: BattleRoom;
+  pending?: boolean;
 }

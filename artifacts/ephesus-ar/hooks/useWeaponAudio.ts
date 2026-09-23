@@ -49,6 +49,10 @@ export function useWeaponAudio(): WeaponAudio {
   const poolRecency = useRef(new Map<SoundKey, number>());
   const poolSequence = useRef(0);
   const lifecycleGeneration = useRef(0);
+  // Share one mount/foreground session activation across all shots. Calling
+  // activateNativeAudioSession for every trigger serializes native promises
+  // indefinitely during sustained fire on Android.
+  const sessionReady = useRef<Promise<void>>(Promise.resolve());
   const mounted = useRef(true);
   // AppState.currentState can briefly be null/unknown while Expo Go finishes
   // attaching the bridge. Treat that startup state as usable rather than
@@ -137,7 +141,8 @@ export function useWeaponAudio(): WeaponAudio {
 
   useEffect(() => {
     mounted.current = true;
-    void ensureNativeAudioSession().catch(() => {
+    sessionReady.current = ensureNativeAudioSession();
+    void sessionReady.current.catch(() => {
       if (mounted.current) {
         setError('Ses sistemi başlatılamadı. Cihaz sesini açıp SESİ DENE düğmesine basın.');
       }
@@ -160,7 +165,8 @@ export function useWeaponAudio(): WeaponAudio {
       } else {
         // Audio mode is process-wide and may have been deactivated by the
         // OS or another app even while React Native stayed mounted.
-        void ensureNativeAudioSession().catch(() => {
+        sessionReady.current = ensureNativeAudioSession();
+        void sessionReady.current.catch(() => {
           if (mounted.current) {
             setError('Ses sistemi yeniden başlatılamadı. Cihaz sesini açıp SESİ DENE düğmesine basın.');
           }
@@ -228,6 +234,8 @@ export function useWeaponAudio(): WeaponAudio {
           if (!player.isLoaded || player.currentStatus.error) {
             throw new Error('Audio player is not loaded');
           }
+          // Stop the previous play before rewinding a pooled Android player.
+          player.pause();
           return player.seekTo(0).then(() => {
             if (
               !mounted.current
@@ -268,7 +276,9 @@ export function useWeaponAudio(): WeaponAudio {
       queuedRequests.current.set(key, requestId);
     }
 
-    void Promise.all([activateNativeAudioSession(), pool.ready])
+    // Native audio activation is shared at mount/foreground; avoid queuing
+    // one process-wide activation request per automatic-weapon shot.
+    void Promise.all([sessionReady.current, pool.ready])
       .then(() => {
         if (queuedRequests.current.get(key) === requestId) {
           queuedRequests.current.delete(key);
@@ -294,7 +304,14 @@ export function useWeaponAudio(): WeaponAudio {
 
   const playShot = useCallback((id: WeaponId) => play(id), [play]);
   const playReload = useCallback(() => play('reload'), [play]);
-  const playTestSound = useCallback((id: WeaponId) => play(id), [play]);
+  const playTestSound = useCallback((id: WeaponId) => {
+    // A failed mount/foreground activation leaves its shared promise rejected.
+    // A deliberate retry must replace that promise or every later shot fails
+    // immediately without asking the native session to recover.
+    sessionReady.current = activateNativeAudioSession();
+    disposePool(id);
+    play(id);
+  }, [disposePool, play]);
   const prepareWeapon = useCallback((id: WeaponId) => {
     ensurePool(id);
   }, [ensurePool]);

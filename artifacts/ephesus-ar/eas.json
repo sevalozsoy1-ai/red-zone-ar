@@ -7,7 +7,7 @@
     "preview": {
       "distribution": "internal",
       "environment": "preview",
-      "corepack": true,
+      "corepack": false,
       "node": "20.19.4",
       "pnpm": "10.26.1",
       "android": {

@@ -26,6 +26,7 @@ export type NetworkShotRejected = {
   reason?: string;
 };
 export type NetworkShotAck = NetworkShotRejected & { accepted?: boolean };
+export type FlashObservation = { observedAt: number; confidence: number; shooterBeaconId: number };
 export type NetworkRoomState = {
   room: unknown;
   playerId?: string;
@@ -188,6 +189,13 @@ export function useBattleSocket(
     return true;
   }, [emitIntent]);
 
+  const sendFlashObservation = useCallback((observation: FlashObservation) => {
+    const socket = socketRef.current;
+    if (!socket?.connected) return false;
+    socket.emit("battle:flash-observation", observation);
+    return true;
+  }, []);
+
   return {
     status,
     connected: status === "connected",
@@ -196,5 +204,6 @@ export function useBattleSocket(
     ackEvents,
     lastRoomState,
     sendShotIntent,
+    sendFlashObservation,
   };
 }

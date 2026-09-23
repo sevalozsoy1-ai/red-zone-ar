@@ -129,28 +129,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/BattleSession"
-  /battle/rooms/{code}/shots:
-    post:
-      operationId: fireBattleShot
-      tags: [battle]
-      summary: Submit a camera-confirmed shot
-      security:
-        - BearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/RoomCode"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/BattleShotInput"
-      responses:
-        "200":
-          description: Server-verified shot result
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/BattleShotResult"
   /battle/rooms/{code}/network-shots:
     post:
       operationId: fireNetworkBattleShot
@@ -207,14 +185,6 @@ components:
     BattleAccessInput:
       type: object
       properties: {}
-    BattleShotInput:
-      type: object
-      required: [markerId, firedAt, weaponId, fireMode]
-      properties:
-        markerId: { type: integer, minimum: 0, maximum: 9 }
-        firedAt: { type: integer }
-        weaponId: { type: string, minLength: 1, maxLength: 32 }
-        fireMode: { type: string, enum: [primary, throw] }
     NetworkBattleShotInput:
       type: object
       required: [shotId, targetPlayerId, firedAt, weaponId, fireMode]
@@ -279,4 +249,5 @@ components:
         damage: { type: integer, minimum: 0 }
         eliminated: { type: boolean }
         room: { $ref: "#/components/schemas/BattleRoom" }
+        pending: { type: boolean }
 
