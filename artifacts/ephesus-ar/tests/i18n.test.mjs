@@ -44,22 +44,11 @@ test('winner terminal copy is localized for every supported locale', () => {
   }
 });
 
-test('multiplayer consent and target-material copy exists for every supported locale', () => {
-  const keys = [
-    'battleConsent', 'consentRequired', 'cameraPermissionRequest',
-    'cameraPermissionOpenSettings', 'assignedPlayer', 'stickerInstructions',
-    'designRange', 'hitTolerance', 'networkContinuity', 'matchJoinQr',
-    'scanJoinQr', 'manualCodeFallback', 'targetPdf', 'viewPdf', 'printPdf',
-    'sharePdf', 'sharingUnavailable', 'sharingFailed', 'printingFailed',
-    'scanJoinQrHint', 'invalidJoinQr',
-    'tutorialTitle', 'tutorialStep1', 'tutorialStep2', 'tutorialStep3',
-    'tutorialStep4', 'tutorialCameraWarning', 'tutorialSkip', 'tutorialNext',
-    'tutorialBack', 'tutorialDone', 'howToPrepare',
-  ];
+test('camera permission copy exists for every supported locale', () => {
   for (const locale of SUPPORTED_LOCALES) {
-    for (const key of keys) {
-      assert.ok(uiText(locale, key).trim(), `${locale} ${key} copy must not be empty`);
-    }
+    assert.ok(uiText(locale, 'cameraPermissionDenied').trim(), `${locale} denied copy must not be empty`);
+    assert.ok(uiText(locale, 'cameraUnavailable').trim(), `${locale} unavailable copy must not be empty`);
+    assert.ok(uiText(locale, 'cameraUnavailableTitle').trim(), `${locale} unavailable title must not be empty`);
   }
 });
 

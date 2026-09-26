@@ -75,8 +75,7 @@ release-signing guard before any release task is run.
   Google Play Data safety, content rating, target-audience, app-access, and
   permissions declarations. The in-app settings disclosure now describes
   on-device camera processing, local preferences/simulation state, and the
-  player name/room/gameplay state plus temporary session credential sent by team
-  battle. It does not invent a developer identity, contact, URL, retention
+   local preferences and simulation state. It does not invent a developer identity, contact, URL, retention
   period, or server policy. The in-app copy is not a substitute for a public
   policy URL; the URL, support contact, legal developer identity, retention,
   and controller/processor details remain owner input blockers.
@@ -120,36 +119,16 @@ complete from source or resolved-toolchain inspection alone.
   a wrong ELF PT_LOAD alignment. Certificate lineage/proof-of-rotation output
   is intentionally unsupported when ambiguous and fails closed.
 
-## Team battle release gates
-
-- Battle rooms and session metadata now use the PostgreSQL persistence adapter,
-  with transaction locking and startup hydration; a server restart no longer
-  inherently discards active rooms. This is implemented in source and tests,
-  but still requires a configured production database and deployment test.
-- State polling and mutations now carry the bearer session in an
-  `Authorization` header; session credentials are no longer placed in query
-  URLs. Production transport and proxy behavior still require verification.
-- Heartbeats, a 15-second lease timeout, a 30-second reconnect grace period,
-  cleanup, and host transfer now handle process termination/network loss.
-  Verify these paths against the deployed service before release.
-- Browser and code tests cover solo creation, late join, explicit departure,
-  match completion, reconnect/lease cleanup, disabled combat controls, shot
-  serialization, and stable winner results. Physical marker detection,
-  concurrent aim/fire, native audio, and camera performance still require
-  actual Android devices; browser tests are not proof of these capabilities.
-  No native build, successful deployment, or Play publication has been
-  completed; physical-device, build, and publish gates remain open.
-
 ## Final binary and device checks
 
 Before production submission, inspect the actual signed AAB with the Android
 bundle inspection tools, install the release (not debug) on representative
 phones, and exercise first launch, camera grant/denial/settings recovery,
-portrait orientation, offline behavior, production API calls, background/return,
+portrait orientation, offline behavior, background/return,
 and the store/payment simulation. Upload to a Play internal-testing track first
 and resolve Play pre-launch, policy, manifest, and 16 KB warnings. An AAB
 binary, real-device verification, a public privacy policy, owner-supplied
-developer/support details, and the listed team battle fixes are still blockers
+ developer/support details, and the listed release checks are still blockers
 for claiming Play readiness.
 
 Policy reference checked for this checklist:

@@ -9,125 +9,45 @@ export interface HealthStatus {
   status: string;
 }
 
-export interface BattleJoinInput {
+export interface VisionTargetRequest {
   /**
-     * @minLength 1
-     * @maxLength 18
+     * JPEG image, at most 60 KB of decoded data
+     * @maxLength 85000
      */
-  name: string;
-  /**
-     * @minLength 16
-     * @maxLength 128
-     * @pattern ^[A-Za-z0-9._:-]+$
-     */
-  requestId?: string;
-}
-
-export interface BattleAccessInput { [key: string]: unknown }
-
-export type NetworkBattleShotInputFireMode = typeof NetworkBattleShotInputFireMode[keyof typeof NetworkBattleShotInputFireMode];
-
-
-export const NetworkBattleShotInputFireMode = {
-  primary: 'primary',
-  throw: 'throw',
-} as const;
-
-export interface NetworkBattleShotInput {
-  /**
-     * @minLength 16
-     * @maxLength 128
-     * @pattern ^[A-Za-z0-9._:-]+$
-     */
-  shotId: string;
-  /**
-     * @minLength 1
-     * @maxLength 128
-     */
-  targetPlayerId: string;
-  firedAt: number;
-  /**
-     * @minLength 1
-     * @maxLength 32
-     */
-  weaponId: string;
-  fireMode: NetworkBattleShotInputFireMode;
-}
-
-export type BattleEffectKind = typeof BattleEffectKind[keyof typeof BattleEffectKind];
-
-
-export const BattleEffectKind = {
-  frag: 'frag',
-  flashbang: 'flashbang',
-  smoke: 'smoke',
-} as const;
-
-export interface BattleEffect {
-  id: string;
-  kind: BattleEffectKind;
-  expiresAt: number;
-}
-
-export interface BattlePlayer {
-  id: string;
-  name: string;
-  markerId: number;
-  markerColor: string;
-  lives: number;
+  imageBase64: string;
   /**
      * @minimum 0
-     * @maximum 100
+     * @maximum 1
      */
-  hp: number;
-  alive: boolean;
-  respawnAt: number;
-  isHost: boolean;
-  connected: boolean;
+  aimX: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  aimY: number;
 }
 
-export type BattleRoomStatus = typeof BattleRoomStatus[keyof typeof BattleRoomStatus];
+export type VisionTargetResultCategory = typeof VisionTargetResultCategory[keyof typeof VisionTargetResultCategory];
 
 
-export const BattleRoomStatus = {
-  lobby: 'lobby',
-  active: 'active',
-  finished: 'finished',
+export const VisionTargetResultCategory = {
+  car: 'car',
+  truck: 'truck',
+  bus: 'bus',
+  motorcycle: 'motorcycle',
+  bicycle: 'bicycle',
+  building: 'building',
+  tree: 'tree',
+  other: 'other',
+  none: 'none',
 } as const;
 
-export interface BattleRoom {
-  code: string;
-  status: BattleRoomStatus;
-  winnerPlayerId: string | null;
-  draw: boolean;
-  players: BattlePlayer[];
-  effects: BattleEffect[];
-  maxPlayers: number;
-  updatedAt: number;
+export interface VisionTargetResult {
+  category: VisionTargetResultCategory;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  confidence: number;
 }
-
-export interface BattleSession {
-  playerId: string;
-  sessionToken: string;
-  room: BattleRoom;
-}
-
-export interface BattleShotResult {
-  accepted: boolean;
-  reason: string;
-  shooterId: string;
-  targetId: string;
-  /** @minimum 0 */
-  damage: number;
-  eliminated: boolean;
-  room: BattleRoom;
-  pending?: boolean;
-}
-
-export type GetBattleStateParams = {
-/**
- * @pattern ^[A-Z0-9]{6}$
- */
-code: string;
-};
 

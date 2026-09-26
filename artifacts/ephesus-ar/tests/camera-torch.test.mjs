@@ -9,7 +9,7 @@ import {
 } from '../lib/camera-torch.ts';
 import { FLASH_PULSE_DURATION_MS } from '../lib/camera-torch.ts';
 
-test('free-mode shot flash is a visible short cue, not a long identity beacon', () => {
+test('free-mode shot flash is a brief visible cue', () => {
   assert.ok(FLASH_PULSE_DURATION_MS >= 250);
   assert.ok(FLASH_PULSE_DURATION_MS <= 500);
 });

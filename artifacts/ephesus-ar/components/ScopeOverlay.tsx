@@ -4,11 +4,10 @@ import Svg, { Path, Circle, Line, Defs, RadialGradient, Stop } from 'react-nativ
 import { useI18n } from '@/hooks/useI18n';
 import { uiText } from '@/lib/i18n';
 
-export function ScopeOverlay({ aimAnim, isScopeActive, zoom, zeroOffset, reticleColor }: {
+export function ScopeOverlay({ aimAnim, isScopeActive, zoom, reticleColor }: {
   aimAnim: Animated.ValueXY;
   isScopeActive: boolean;
   zoom: number;
-  zeroOffset: { x: number; y: number };
   reticleColor?: string;
 }) {
   const { width, height } = useWindowDimensions();
@@ -21,8 +20,8 @@ export function ScopeOverlay({ aimAnim, isScopeActive, zoom, zeroOffset, reticle
   const viewportWidth = Math.max(1, width);
   const viewportHeight = Math.max(1, height);
   const lensRadius = Math.max(1, Math.min(180, Math.min(viewportWidth, viewportHeight) * 0.38));
-  const centerX = viewportWidth / 2 + zeroOffset.x;
-  const centerY = viewportHeight / 2 + zeroOffset.y;
+  const centerX = viewportWidth / 2;
+  const centerY = viewportHeight / 2;
 
   useEffect(() => {
     enterAnim.stopAnimation();

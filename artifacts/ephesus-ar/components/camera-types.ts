@@ -2,6 +2,7 @@ export type CameraFrame = {
   width: number;
   height: number;
   data: Uint8Array | Uint8ClampedArray;
+  capturedAt?: number;
 };
 
 export type CameraStatus = {
@@ -18,4 +19,5 @@ export type LiveBattleCameraProps = {
   onFacingUnavailable?: (facing: "front" | "back") => void;
   fireSignal?: number;
   flashlightEnabled?: boolean;
+  torchOn?: boolean;
 };

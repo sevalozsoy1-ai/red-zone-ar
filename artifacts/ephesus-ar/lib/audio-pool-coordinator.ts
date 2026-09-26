@@ -18,6 +18,32 @@ export interface AudioPoolCoordinator<T> {
   readonly size: number;
 }
 
+export type AudioPoolCacheCandidate<Key extends string = string> = {
+  key: Key;
+  recency: number;
+  busy: boolean;
+  playing: boolean;
+  loading: boolean;
+  queued: boolean;
+  pendingRequest: boolean;
+};
+
+/**
+ * Find an idle cache entry without interrupting a player, a pending preload,
+ * or a request waiting for that preload. Keeping this policy pure makes the
+ * delayed-load LRU behavior testable without native audio players.
+ */
+export function findLeastRecentlyUsedEvictableAudioPool<Key extends string>(
+  candidates: readonly AudioPoolCacheCandidate<Key>[],
+  protectedKey?: Key,
+): Key | null {
+  return candidates
+    .filter((candidate) => candidate.key !== protectedKey)
+    .filter((candidate) => !candidate.busy && !candidate.playing && !candidate.loading
+      && !candidate.queued && !candidate.pendingRequest)
+    .sort((first, second) => first.recency - second.recency)[0]?.key ?? null;
+}
+
 /**
  * Keeps pooled native players single-owner while a seek/play operation is
  * pending. The coordinator is deliberately platform agnostic so its lifecycle

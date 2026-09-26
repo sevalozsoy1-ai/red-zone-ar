@@ -6,16 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export * from './battleAccessInput';
-export * from './battleEffect';
-export * from './battleEffectKind';
-export * from './battleJoinInput';
-export * from './battlePlayer';
-export * from './battleRoom';
-export * from './battleRoomStatus';
-export * from './battleSession';
-export * from './battleShotResult';
-export * from './getBattleStateParams';
 export * from './healthStatus';
-export * from './networkBattleShotInput';
-export * from './networkBattleShotInputFireMode';
+export * from './visionTargetRequest';
+export * from './visionTargetResult';
+export * from './visionTargetResultCategory';

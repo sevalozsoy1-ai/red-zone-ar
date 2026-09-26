@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createAudioPoolCoordinator } from '../lib/audio-pool-coordinator.ts';
+import {
+  createAudioPoolCoordinator,
+  findLeastRecentlyUsedEvictableAudioPool,
+} from '../lib/audio-pool-coordinator.ts';
 
 test('a player lease is exclusive until its operation completes', () => {
   const pool = createAudioPoolCoordinator(['a']);
@@ -49,4 +52,49 @@ test('predicate-aware acquire skips an unloaded secondary player', () => {
   assert.equal(pool.acquire((player) => player.loaded), null);
   lease.release();
   assert.equal(pool.busyCount, 0);
+});
+
+test('mixed sound burst retains queued pools during delayed loads and trims after playback', async () => {
+  const sounds = ['weapon', 'reload', 'enemy-rifle', 'enemy-heavy'].map((key, index) => ({
+    key,
+    recency: index + 1,
+    busy: false,
+    playing: false,
+    loading: true,
+    queued: true,
+    pendingRequest: true,
+  }));
+  const deferredLoads = sounds.map(() => {
+    let resolve;
+    const promise = new Promise((done) => { resolve = done; });
+    return { promise, resolve };
+  });
+  const settledLoads = deferredLoads.map((load, index) => load.promise.then(() => {
+    sounds[index].loading = false;
+  }));
+
+  // Four distinct sounds arrive while all source files are still loading.
+  assert.equal(findLeastRecentlyUsedEvictableAudioPool(sounds), null);
+  deferredLoads.forEach((load) => load.resolve());
+  await Promise.all(settledLoads);
+
+  // A resolved preload is still protected until its deferred shot transfers
+  // from the request queue to an active player lease.
+  assert.equal(findLeastRecentlyUsedEvictableAudioPool(sounds), null);
+  sounds.forEach((sound) => {
+    sound.queued = false;
+    // A shot may still be waiting for session activation before it can lease
+    // a player, even though this particular pool's asset is ready.
+    sound.pendingRequest = true;
+  });
+  assert.equal(findLeastRecentlyUsedEvictableAudioPool(sounds), null);
+  sounds.forEach((sound) => {
+    sound.pendingRequest = false;
+    sound.busy = true;
+  });
+  assert.equal(findLeastRecentlyUsedEvictableAudioPool(sounds), null);
+
+  // Once playback and leases settle, normal LRU trimming can resume.
+  sounds.forEach((sound) => { sound.busy = false; });
+  assert.equal(findLeastRecentlyUsedEvictableAudioPool(sounds), 'weapon');
 });

@@ -153,8 +153,8 @@ const ENGLISH_COPY = {
   closeErrorDetails: 'Close error details',
   detailAbout: 'Red Zone AR is a camera-based action and weapon simulation game developed by Ephesus Medya.',
   detailDeveloper: 'Developer: Halil Özsoy\n\nRed Zone AR is independently developed under Ephesus Medya.',
-  detailPrivacy: 'Camera frames are processed on this device only during an active camera session; this app does not upload them. This build does not request microphone or location access and does not create recordings. Preferences and simulation progress are stored locally with AsyncStorage. Team battle sends the player name you choose, room, team, marker, gameplay state, and a temporary session credential to the configured API; camera frames, microphone audio, and location are not sent. This build has no live ads, payments, accounts, or third-party analytics. A public privacy-policy URL and support contact are not configured in this test build; this in-app summary is not a substitute for a published policy.',
-  detailSecurity: 'Local preferences and simulation progress stay on the device. Multiplayer requests use a temporary session credential and send only the room/gameplay data needed by the configured API. Camera frames, microphone audio, and location are not sent by this app.',
+  detailPrivacy: 'Camera frames are processed on this device only during an active camera session; this app does not upload them. This build does not request microphone or location access and does not create recordings. Preferences and simulation progress are stored locally with AsyncStorage. This build has no live ads, payments, accounts, or third-party analytics. A public privacy-policy URL and support contact are not configured in this test build; this in-app summary is not a substitute for a published policy.',
+  detailSecurity: 'Local preferences and simulation progress stay on the device. Camera frames, microphone audio, and location are not sent by this app.',
   detailGuide: '1. Grant camera access. 2. Choose equipment from the catalogue; all equipment is available in this simulation. 3. Move the sight with the joystick and use the action button to fire. 4. Night and thermal views are visual filter simulations, not real sensing. 5. Ads in this build are simulations. 6. Camera processing stays on this device.',
   countryTR: 'Türkiye',
   countryDE: 'Germany',
@@ -264,30 +264,26 @@ export const TRANSLATIONS = {
   },
 } as unknown as Record<Locale, TranslationDictionary>;
 
-// Privacy copy is deliberately kept separate from the legacy catalogue. The
-// catalogue predates the multiplayer API and contains outdated recording
-// claims. Preserve existing branding while updating data-use disclosures.
+// Privacy copy is deliberately kept separate from the legacy catalogue so
+// disclosures stay accurate even when older translation entries remain.
 type DisclosureKey = 'detailPrivacy' | 'detailSecurity' | 'permissionsText' | 'recordingAccess' | 'recordingLater';
 const DISCLOSURE_COPY: Record<'tr' | 'en', Record<DisclosureKey, string>> = {
   tr: {
     permissionsText: 'Oynamak için kamera erişimi ver. Bu derleme kayıt özelliği içermez.',
     recordingAccess: 'Kayıt özelliği yok',
     recordingLater: 'Bu derlemede kayıt için mikrofon veya medya izni istenmez.',
-    detailPrivacy: 'Kamera kareleri yalnızca aktif kamera oturumu sırasında bu cihazda işlenir; bu uygulama tarafından yüklenmez. Bu derleme mikrofon veya konum erişimi istemez ve kayıt oluşturmaz. Tercihler ve simülasyon ilerlemesi AsyncStorage ile cihazda saklanır. Takım savaşı, seçtiğin oyuncu adını, oda, takım, işaretçi ve oyun durumunu ve geçici bir oturum kimliğini yapılandırılmış API’ye gönderir; kamera kareleri, mikrofon sesi ve konum gönderilmez. Bu derlemede canlı reklam, ödeme, hesap veya üçüncü taraf analitik yoktur. Genel gizlilik politikası URL’si ve destek iletişimi bu test derlemesinde yapılandırılmamıştır; bu uygulama içi özet yayımlanmış politikanın yerine geçmez.',
-    detailSecurity: 'Yerel tercihler ve simülasyon ilerlemesi cihazda tutulur. Çok oyunculu isteklerde geçici bir oturum kimliği kullanılır ve yalnızca yapılandırılmış API’nin ihtiyaç duyduğu oda/oyun verileri gönderilir. Kamera kareleri, mikrofon sesi ve konum bu uygulama tarafından gönderilmez.',
+    detailPrivacy: 'Kamera kareleri yalnızca aktif kamera oturumu sırasında bu cihazda işlenir; bu uygulama tarafından yüklenmez. Bu derleme mikrofon veya konum erişimi istemez ve kayıt oluşturmaz. Tercihler ve simülasyon ilerlemesi AsyncStorage ile cihazda saklanır. Bu derlemede canlı reklam, ödeme, hesap veya üçüncü taraf analitik yoktur. Genel gizlilik politikası URL’si ve destek iletişimi bu test derlemesinde yapılandırılmamıştır; bu uygulama içi özet yayımlanmış politikanın yerine geçmez.',
+    detailSecurity: 'Yerel tercihler ve simülasyon ilerlemesi cihazda tutulur. Kamera kareleri bu uygulama tarafından sunucuya gönderilmez.',
   },
   en: {
     permissionsText: 'Allow camera access to play. This build does not include recording.',
     recordingAccess: 'Recording is not available',
     recordingLater: 'This build does not request microphone or media access for recording.',
-    detailPrivacy: 'Camera frames are processed on this device only during an active camera session; this app does not upload them. This build does not request microphone or location access and does not create recordings. Preferences and simulation progress are stored locally with AsyncStorage. Team battle sends the player name you choose, room, team, marker, gameplay state, and a temporary session credential to the configured API; camera frames, microphone audio, and location are not sent. This build has no live ads, payments, accounts, or third-party analytics. A public privacy-policy URL and support contact are not configured in this test build; this in-app summary is not a substitute for a published policy.',
-    detailSecurity: 'Local preferences and simulation progress stay on the device. Multiplayer requests use a temporary session credential and send only the room/gameplay data needed by the configured API. Camera frames, microphone audio, and location are not sent by this app.',
+    detailPrivacy: 'Camera frames are processed on this device only during an active camera session; this app does not upload them. This build does not request microphone or location access and does not create recordings. Preferences and simulation progress are stored locally with AsyncStorage. This build has no live ads, payments, accounts, or third-party analytics. A public privacy-policy URL and support contact are not configured in this test build; this in-app summary is not a substitute for a published policy.',
+    detailSecurity: 'Local preferences and simulation progress stay on the device. Camera frames are not sent to a server by this app.',
   },
 };
 
-// The battle controls use direct screen dragging for aim. Keep this copy
-// separate from the legacy catalogue entries so an older persisted bundle
-// cannot reintroduce joystick instructions.
 const TOUCH_AIM_DETAIL_GUIDES: Record<Locale, string> = {
   tr: '1. Kamera erişimi ver. 2. Katalogdan ekipman seç; bu simülasyonda tüm ekipmanlar açıktır. 3. Nişangâhı ekrana dokunup sürükleyerek hareket ettir ve eylem düğmesiyle ateş et. 4. Gece ve termal görünümler gerçek algılama değil, görsel filtre simülasyonudur. 5. Bu sürümde reklamlar simülasyondur. 6. Kamera işleme cihazda kalır. 7. Ses her zaman açıktır; düzeyi cihazının ses düğmeleriyle ayarla.',
   en: '1. Grant camera access. 2. Choose equipment from the catalogue; all equipment is available in this simulation. 3. Drag on the screen to move the sight and use the action button to fire. 4. Night and thermal views are visual filter simulations, not real sensing. 5. Ads in this build are simulations. 6. Camera processing stays on this device. 7. Audio is always enabled; adjust its level with your device volume buttons.',
@@ -988,7 +984,22 @@ const CAMERA_ONLY_COPY: Record<
 for (const locale of SUPPORTED_LOCALES) {
   Object.assign(TRANSLATIONS[locale], COMMERCE_COPY[locale]);
   Object.assign(TRANSLATIONS[locale], CAMERA_ONLY_COPY[locale]);
-  TRANSLATIONS[locale].detailGuide = TOUCH_AIM_DETAIL_GUIDES[locale];
+  // Critical privacy copy must not claim frames *never* leave the device now
+  // that optional, explicit AI recognition can send one reduced shot frame.
+  // Use English until a reviewed translation is available for other locales.
+  const turkish = locale === 'tr';
+  TRANSLATIONS[locale].onDeviceProcessing = turkish
+    ? 'Yerel kamera takibi · AI tanıma isteğe bağlıdır'
+    : 'Local camera tracking · AI recognition is optional';
+  TRANSLATIONS[locale].detailPrivacy = turkish
+    ? 'Varsayılan olarak kamera kareleri cihazda işlenir. Savaş ekranında AI tanımayı açıkça etkinleştirirsen atış sırasında en fazla 10 saniyede bir küçültülmüş tek kare OpenAI servisine gönderilir. Sürekli video gönderilmez. Bu uygulama kareleri saklamaz; sağlayıcının veri politikası geçerlidir.'
+    : 'By default camera frames are processed on your device. If you explicitly enable AI recognition in battle, at most one reduced shot frame every 10 seconds is sent to OpenAI. Continuous video is never sent. This app does not store those frames; the provider’s data policy applies.';
+  TRANSLATIONS[locale].detailSecurity = turkish
+    ? 'Tercihler cihazda saklanır. İsteğe bağlı AI tanıma kapalıyken kamera kareleri sunucuya gönderilmez. AI tanımayı açarsan yalnızca sınırlı atış kareleri analiz için sunucu üzerinden OpenAI servisine gönderilir. Bu işlem ücret doğurabilir.'
+    : 'Preferences are stored on your device. With optional AI recognition off, camera frames are not uploaded. If you opt in, limited shot frames are sent through the app server to OpenAI for analysis. Usage may incur charges.';
+  TRANSLATIONS[locale].detailGuide = turkish
+    ? `${TOUCH_AIM_DETAIL_GUIDES[locale]}\n\nAI tanıma varsayılan olarak kapalıdır. Açarsan sınırlı atış kareleri OpenAI servisine gönderilir; yerel takip AI olmadan da çalışır.`
+    : '1. Allow camera access. 2. Select a weapon and aim using the touch layer. 3. Fire to place a local visual effect on the current image region. 4. Night and thermal modes are simulated filters. 5. Optional AI recognition is off by default; enabling it sends limited shot frames to OpenAI. Local tracking works without it.';
   TRANSLATIONS[locale].soundTest = SOUND_TEST_COPY[locale];
 }
 
@@ -1078,8 +1089,6 @@ export function countryTranslationKey(country: 'TR' | 'DE' | 'UA' | 'US'): Trans
 }
 
 export function translate(locale: Locale, key: TranslationKey): string {
-  if (key === 'teamBattle') return locale === 'tr' ? 'ÖLÜM MAÇI' : 'DEATHMATCH';
-  if (key === 'players' && locale === 'tr') return '1–10 OYUNCU';
   if (key in DISCLOSURE_COPY.tr) {
     const disclosure = DISCLOSURE_COPY[locale === 'tr' ? 'tr' : 'en'][key as DisclosureKey];
     if (disclosure) return disclosure;
@@ -1216,18 +1225,6 @@ const FACING_LABELS: Record<Locale, readonly [string, string]> = {
 
 export function cameraFacingLabel(locale: Locale, facing: 'front' | 'back'): string {
   return FACING_LABELS[locale][facing === 'front' ? 0 : 1];
-}
-
-const TEAM_LABELS: Record<Locale, readonly [string, string]> = {
-  tr: ['KIRMIZI', 'MAVİ'], en: ['RED', 'BLUE'], zh: ['红队', '蓝队'], ja: ['赤', '青'], ar: ['الأحمر', 'الأزرق'],
-  de: ['ROT', 'BLAU'], fr: ['ROUGE', 'BLEU'], es: ['ROJO', 'AZUL'], it: ['ROSSA', 'BLU'], pt: ['VERMELHO', 'AZUL'],
-  ru: ['КРАСНАЯ', 'СИНЯЯ'], uk: ['ЧЕРВОНА', 'СИНЯ'], hi: ['लाल', 'नीली'], ur: ['سرخ', 'نیلی'], bn: ['লাল', 'নীল'],
-  pa: ['ਲਾਲ', 'ਨੀਲਾ'], id: ['MERAH', 'BIRU'], ko: ['레드', '블루'], vi: ['ĐỎ', 'XANH'], th: ['แดง', 'น้ำเงิน'],
-  nl: ['ROOD', 'BLAUW'], pl: ['CZERWONA', 'NIEBIESKA'], sv: ['RÖD', 'BLÅ'], fa: ['قرمز', 'آبی'],
-};
-
-export function teamLabel(locale: Locale, team: 'red' | 'blue'): string {
-  return TEAM_LABELS[locale][team === 'red' ? 0 : 1];
 }
 
 /**

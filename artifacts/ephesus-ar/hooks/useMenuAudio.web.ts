@@ -12,6 +12,7 @@ import {
 } from '@/lib/audio-settings';
 
 const INTRO_SOURCE = require('../assets/audio/red-zone-menu-combat.mp3');
+const BATTLE_SOURCE = require('../assets/audio/battle-ambient.mp3');
 const ACCENT_SOURCE = require('../assets/audio/red-zone-weapon-menu-accent.mp3');
 const INTRO_VOLUME = 0.22;
 const ACCENT_VOLUME = 0.3;
@@ -24,6 +25,7 @@ type WebkitWindow = Window & typeof globalThis & {
 export type MenuAudioOptions = {
   enabled: boolean;
   ready: boolean;
+  track?: 'menu' | 'battle';
 };
 
 export type MenuAudio = {
@@ -36,8 +38,9 @@ export type MenuAudio = {
  * listener resumes the engine itself; it never plays-and-pauses an audio
  * player as an unlock probe, which would race the first real weapon action.
  */
-export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
+export function useMenuAudio({ enabled, ready, track = 'menu' }: MenuAudioOptions): MenuAudio {
   const { audioVolumes, musicEnabled } = useGame();
+  const musicVolume = track === 'battle' ? 0.16 : INTRO_VOLUME;
   const [error, setError] = useState<string | null>(null);
   const context = useRef<AudioContext | null>(null);
   const buffers = useRef<Partial<Record<SoundKey, AudioBuffer>>>({});
@@ -106,7 +109,7 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
     if (existing) return existing;
 
     const request = (async () => {
-      const source = key === 'intro' ? INTRO_SOURCE : ACCENT_SOURCE;
+      const source = key === 'intro' ? (track === 'battle' ? BATTLE_SOURCE : INTRO_SOURCE) : ACCENT_SOURCE;
       const uri = Asset.fromModule(source).uri;
       const response = await fetch(uri);
       if (!response.ok) throw new Error(`Audio request failed: ${response.status}`);
@@ -117,12 +120,12 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
       buffers.current[key] = buffer;
     })().catch((loadError) => {
       delete loading.current[key];
-      if (mounted.current) setError('Menü sesleri indirilemedi veya çözülemedi.');
+      if (mounted.current) setError('Ses dosyaları indirilemedi veya çözülemedi.');
       throw loadError;
     });
     loading.current[key] = request;
     return request;
-  }, []);
+  }, [track]);
 
   const resumeAudio = useCallback(() => {
     const audioContext = ensureContext();
@@ -175,7 +178,7 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
         if (!buffer) throw new Error('Missing decoded menu intro');
         source.buffer = buffer;
         source.loop = true;
-        gain.gain.value = INTRO_VOLUME * effectiveMusicVolume(audioVolumes);
+        gain.gain.value = musicVolume * effectiveMusicVolume(audioVolumes);
         source.connect(gain);
         gain.connect(audioContext.destination);
         introSource.current = source;
@@ -191,10 +194,10 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
       .catch(() => {
         introStartQueued.current = false;
         if (mounted.current) {
-          setError('Menü müziği oynatılamadı. Tarayıcıda ilk dokunuşu deneyin.');
+          setError('Müzik oynatılamadı. Tarayıcıda ilk dokunuşu deneyin.');
         }
       });
-  }, [audioVolumes, ensureContext, loadBuffer, resumeAudio, stopSource]);
+  }, [audioVolumes, ensureContext, loadBuffer, musicVolume, resumeAudio, stopSource]);
 
   const playWeaponAccent = useCallback(() => {
     if (
@@ -249,9 +252,9 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
   }, [audioVolumes, ensureContext, loadBuffer, resumeAudio, stopSource]);
 
   useEffect(() => {
-    if (introGain.current) introGain.current.gain.value = INTRO_VOLUME * effectiveMusicVolume(audioVolumes);
+    if (introGain.current) introGain.current.gain.value = musicVolume * effectiveMusicVolume(audioVolumes);
     if (accentGain.current) accentGain.current.gain.value = ACCENT_VOLUME * effectiveEffectsVolume(audioVolumes);
-  }, [audioVolumes]);
+  }, [audioVolumes, musicVolume]);
 
   const activateAudio = useCallback(() => {
     activated.current = true;

@@ -15,6 +15,7 @@ import {
 } from '@/lib/audio-settings';
 
 const INTRO_SOURCE = require('../assets/audio/red-zone-menu-combat.mp3');
+const BATTLE_SOURCE = require('../assets/audio/battle-ambient.mp3');
 const ACCENT_SOURCE = require('../assets/audio/red-zone-weapon-menu-accent.mp3');
 const INTRO_VOLUME = 0.22;
 const ACCENT_VOLUME = 0.3;
@@ -22,6 +23,7 @@ const ACCENT_VOLUME = 0.3;
 export type MenuAudioOptions = {
   enabled: boolean;
   ready: boolean;
+  track?: 'menu' | 'battle';
 };
 
 export type MenuAudio = {
@@ -35,8 +37,9 @@ export type MenuAudio = {
  * intro player can finish downloading while a user's first camera tap is
  * already firing a weapon, so sharing either player/pool would race that tap.
  */
-export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
+export function useMenuAudio({ enabled, ready, track = 'menu' }: MenuAudioOptions): MenuAudio {
   const { audioVolumes, musicEnabled } = useGame();
+  const musicVolume = track === 'battle' ? 0.16 : INTRO_VOLUME;
   const [error, setError] = useState<string | null>(null);
   const introPlayer = useRef<AudioPlayer | null>(null);
   const accentPlayer = useRef<AudioPlayer | null>(null);
@@ -121,7 +124,7 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
       .catch(() => {
         introStartQueued.current = false;
         if (mounted.current) {
-          setError('Menü müziği yüklenemedi. Cihaz sesini açıp tekrar deneyin.');
+          setError('Müzik yüklenemedi. Cihaz sesini açıp tekrar deneyin.');
         }
       });
   }, []);
@@ -185,7 +188,7 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
     });
 
     try {
-      const intro = createAudioPlayer(INTRO_SOURCE, {
+      const intro = createAudioPlayer(track === 'battle' ? BATTLE_SOURCE : INTRO_SOURCE, {
         downloadFirst: true,
         keepAudioSessionActive: true,
       });
@@ -193,7 +196,7 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
         downloadFirst: true,
         keepAudioSessionActive: true,
       });
-      intro.volume = INTRO_VOLUME * effectiveMusicVolume(audioVolumes);
+      intro.volume = musicVolume * effectiveMusicVolume(audioVolumes);
       intro.loop = true;
       accent.volume = ACCENT_VOLUME * effectiveEffectsVolume(audioVolumes);
       accent.loop = false;
@@ -207,7 +210,7 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
       void introSourceReady.catch(() => undefined);
       void accentSourceReady.catch(() => undefined);
     } catch {
-      setError('Menü sesleri yüklenemedi.');
+      setError('Ses dosyaları yüklenemedi.');
     }
 
     const subscription = AppState.addEventListener('change', (state) => {
@@ -242,9 +245,9 @@ export function useMenuAudio({ enabled, ready }: MenuAudioOptions): MenuAudio {
   }, [startIntro, stopAccent, stopIntro]);
 
   useEffect(() => {
-    if (introPlayer.current) introPlayer.current.volume = INTRO_VOLUME * effectiveMusicVolume(audioVolumes);
+    if (introPlayer.current) introPlayer.current.volume = musicVolume * effectiveMusicVolume(audioVolumes);
     if (accentPlayer.current) accentPlayer.current.volume = ACCENT_VOLUME * effectiveEffectsVolume(audioVolumes);
-  }, [audioVolumes]);
+  }, [audioVolumes, musicVolume]);
 
   useEffect(() => {
     if (!enabled || !ready || !active.current) {

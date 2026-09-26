@@ -1,5 +1,4 @@
-// The free-mode shot flash is only a visible cue. Multiplayer identity is
-// carried by the separate continuous coded rear beacon, not this pulse.
+// The free-mode shot flash is only a visible cue.
 export const FLASH_PULSE_DURATION_MS = 350;
 
 export type CameraTorchAvailability = {

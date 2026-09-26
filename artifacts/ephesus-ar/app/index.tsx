@@ -28,13 +28,10 @@ import HomeGameBanner from '@/components/HomeGameBanner';
 import WeaponSelectionScreen from '@/components/WeaponSelectionScreen';
 import { WEAPONS } from '@/lib/weapons';
 import { CREDIT_PACKAGES } from '@/lib/commerce';
-import BattleLobbyScreen from '@/components/BattleLobbyScreen';
-import { setBattleSessionToken } from '@/lib/battle-auth';
 import CreditTopUpPanel from '@/components/CreditTopUpPanel';
 import GoldPurchasePanel from '@/components/GoldPurchasePanel';
 import EconomyGate from '@/components/EconomyGate';
 import { economyText, formatUsdFromCents } from '@/lib/economy-ui';
-import type { BattleSession } from '@workspace/api-client-react';
 import {
   countryTranslationKey,
   detectPreferredLocale,
@@ -51,7 +48,7 @@ import { rtlLayout } from '@/lib/rtl';
 import { useMenuAudio } from '@/hooks/useMenuAudio';
 import type { AudioVolumeKey } from '@/lib/audio-settings';
 
-type Screen = 'boot' | 'permissions' | 'briefing' | 'home' | 'camera' | 'multiplayer' | 'settings' | 'armory' | 'store';
+type Screen = 'boot' | 'permissions' | 'briefing' | 'home' | 'camera' | 'settings' | 'armory' | 'store';
 
 const COUNTRIES: Record<CountryCode, { flag: string }> = {
   TR: { flag: '🇹🇷' },
@@ -326,7 +323,7 @@ function CountryPicker({ label, selected, onSelect, locale }: { label: string; s
   );
 }
 
-function HomeScreen({ onNavigate, onOpenCamera, onOpenTeamBattle }: { onNavigate: (screen: Screen) => void; onOpenCamera: () => void; onOpenTeamBattle: () => void }) {
+function HomeScreen({ onNavigate, onOpenCamera }: { onNavigate: (screen: Screen) => void; onOpenCamera: () => void }) {
   const colors = useColors();
   const { creditCents, activeGold, isWeaponUnlocked } = useGame();
   const { t, rtl, locale } = useI18n();
@@ -338,7 +335,6 @@ function HomeScreen({ onNavigate, onOpenCamera, onOpenTeamBattle }: { onNavigate
         <View style={styles.homeHeader}><View><Text style={[styles.overline, { color: '#FF453A' }]}>{t('brand')}</Text><Text style={[styles.homeTitle, { color: colors.foreground }]}>{t('home')}</Text></View><HapticButton onPress={() => onNavigate('settings')} style={[styles.iconButton, { borderColor: colors.border }]}><Feather name="sliders" size={20} color={colors.cyan} /></HapticButton></View>
         <HomeGameBanner />
          <HapticButton testID="home-camera-btn" onPress={onOpenCamera} style={[styles.missionButton, { backgroundColor: colors.cyan }]}><View><Text style={[styles.missionButtonOverline, { color: colors.ink }]}>{t('camera')}</Text><Text style={[styles.missionButtonText, { color: colors.ink }]}>{locale === 'tr' ? 'GEZİNTİYE BAŞLA' : t('openCamera')}</Text></View><View style={[styles.roundArrow, { backgroundColor: colors.ink }]}><Feather name="camera" size={22} color={colors.cyan} /></View></HapticButton>
-        <HapticButton testID="home-team-battle-btn" onPress={onOpenTeamBattle} style={[styles.missionButton, { backgroundColor: colors.amber }]}><View><Text style={[styles.missionButtonOverline, { color: colors.ink }]}>{t('players')}</Text><Text style={[styles.missionButtonText, { color: colors.ink }]}>{t('teamBattle')}</Text></View><View style={[styles.roundArrow, { backgroundColor: colors.ink }]}><Feather name="users" size={22} color={colors.amber} /></View></HapticButton>
           <View style={styles.statsRow}>
             <StatCard label={t('unlockedEquipment')} value={`${unlockedEquipmentCount} / ${WEAPONS.length}`} icon="crosshair" />
             <StatCard label={economyText(locale, 'creditsBalance')} value={activeGold ? 'VIP' : formatUsdFromCents(creditCents, locale)} icon="zap" />
@@ -611,101 +607,11 @@ function StoreScreen({ onBack }: { onBack: () => void }) {
   </View>;
 }
 
-/*
-export default function Index() {
-  const { ready, setOnboarded, setLanguage, setCountry } = useGame();
-  const { locale } = useI18n();
-  const externalCamera = Platform.OS === 'web' && typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('camera') === '1';
-  const [screen, setScreen] = useState<Screen>(() => externalCamera ? 'camera' : 'boot');
-  const [battleSession, setBattleSession] = useState<BattleSession | null>(null);
-  const [soloGateVisible, setSoloGateVisible] = useState(false);
-  // Menu audio has its own intro/effect players. It is active for boot and all
-  // menu screens, but turns off before BattleScreen mounts.
-  // Keep ambience alive while the camera and multiplayer battle are open;
-  // the user's music preference, not navigation, controls playback.
-  const menuAudio = useMenuAudio({ enabled: screen !== 'permissions', ready });
-  const [devicePreferencesApplied, setDevicePreferencesApplied] = useState(false);
-  const setLanguageRef = useRef(setLanguage);
-  const setCountryRef = useRef(setCountry);
-  setLanguageRef.current = setLanguage;
-  setCountryRef.current = setCountry;
-  const navigateFromMenu = useCallback((nextScreen: Screen) => {
-    if (nextScreen !== 'camera') menuAudio.playWeaponAccent();
-    setScreen(nextScreen);
-  }, [menuAudio.playWeaponAccent]);
-  const openTeamBattle = useCallback(() => {
-    // A normal team-battle entry always starts a fresh lobby. Clearing any
-    // previous session prevents a stale combat screen from being reused when
-    // returning from camera mode or an external preview URL.
-    menuAudio.playWeaponAccent();
-    setBattleSessionToken(null);
-    setBattleSession(null);
-    setScreen('multiplayer');
-  }, [menuAudio.playWeaponAccent]);
-  const openSoloCamera = useCallback(() => {
-    menuAudio.playWeaponAccent();
-    setSoloGateVisible(true);
-  }, [menuAudio.playWeaponAccent]);
-  useEffect(() => {
-    if (!shouldApplyDevicePreferences(ready, devicePreferencesApplied, externalCamera)) return;
-    let active = true;
-    AsyncStorage.getItem('ephesus-ar-state')
-      .then((raw) => {
-        if (!active) return;
-        let persisted: { language?: string; country?: CountryCode } = {};
-        try {
-          persisted = raw ? JSON.parse(raw) as typeof persisted : {};
-        } catch {
-          // A malformed preference file is handled by GameContext; use the
-          // device locale only when no usable preference can be read.
-        }
-        if (!persisted.language) setLanguageRef.current(languageForGame(detectPreferredLocale()));
-        if (!persisted.country) setCountryRef.current(detectPreferredRegion());
-      })
-      .finally(() => {
-        if (active) setDevicePreferencesApplied(true);
-      });
-    return () => { active = false; };
-  }, [devicePreferencesApplied, externalCamera, ready]);
-  useEffect(() => { if (ready && !externalCamera) setScreen('boot'); }, [externalCamera, ready]);
-  const bootReady = canLeaveBoot(ready, devicePreferencesApplied, externalCamera);
-  const finishBoot = useCallback(() => {
-    if (bootReady || externalCamera) setScreen('permissions');
-  }, [bootReady, externalCamera]);
-  if ((!bootReady && !externalCamera) || screen === 'boot') {
-    return <BootScreen canLeave={bootReady || externalCamera} onDone={finishBoot} />;
-  }
-  if (screen === 'permissions') return <PermissionScreen onContinue={() => { setOnboarded(true); setScreen('home'); }} />;
-  if (screen === 'camera') return <BattleScreen battleSession={battleSession} onExit={() => { setBattleSession(null); setScreen('home'); }} />;
-  if (screen === 'multiplayer') return <BattleLobbyScreen onBack={() => { setBattleSession(null); navigateFromMenu('home'); }} onStart={(session) => { setBattleSession(session); setScreen('camera'); }} />;
-  if (screen === 'settings') return <SettingsScreen onBack={() => navigateFromMenu('home')} />;
-  if (screen === 'armory') return <WeaponSelectionScreen onBack={() => navigateFromMenu('home')} onCamera={() => { setScreen('home'); setSoloGateVisible(true); }} />;
-  if (screen === 'store') return <StoreScreen onBack={() => navigateFromMenu('home')} />;
-  return (
-    <>
-      <HomeScreen onNavigate={navigateFromMenu} onOpenCamera={openSoloCamera} onOpenTeamBattle={openTeamBattle} />
-      <CameraPerformanceNotice />
-      <EconomyGate
-        visible={soloGateVisible}
-        action="soloEntry"
-        daily
-        body={economyText(locale, 'economySoloDaily')}
-        onApproved={() => true}
-        onComplete={() => { setSoloGateVisible(false); setScreen('camera'); }}
-        onCancel={() => setSoloGateVisible(false)}
-        testID="solo-entry-gate"
-      />
-    </>
-  );
-}
-*/
 export default function Index() {
   const { ready, onboarded, setOnboarded, setLanguage, setCountry } = useGame();
   const { locale } = useI18n();
   const externalCamera = Platform.OS === 'web' && typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('camera') === '1';
   const [screen, setScreen] = useState<Screen>(() => externalCamera ? 'camera' : 'boot');
-  const [battleSession, setBattleSession] = useState<BattleSession | null>(null);
-  const clearBattleSession = useCallback(() => setBattleSession(null), []);
   const [soloGateVisible, setSoloGateVisible] = useState(false);
   // Menu audio has its own intro/effect players. It is active for boot and all
   // menu screens, but turns off before BattleScreen mounts.
@@ -718,15 +624,6 @@ export default function Index() {
   const navigateFromMenu = useCallback((nextScreen: Screen) => {
     if (nextScreen !== 'camera') menuAudio.playWeaponAccent();
     setScreen(nextScreen);
-  }, [menuAudio.playWeaponAccent]);
-  const openTeamBattle = useCallback(() => {
-    // A normal team-battle entry always starts a fresh lobby. Clearing any
-    // previous session prevents a stale combat screen from being reused when
-    // returning from camera mode or an external preview URL.
-    menuAudio.playWeaponAccent();
-    setBattleSessionToken(null);
-    setBattleSession(null);
-    setScreen('multiplayer');
   }, [menuAudio.playWeaponAccent]);
   const openSoloCamera = useCallback(() => {
     menuAudio.playWeaponAccent();
@@ -763,14 +660,13 @@ export default function Index() {
   }
   if (screen === 'permissions') return <PermissionScreen onContinue={() => setScreen('briefing')} />;
   if (screen === 'briefing') return <BriefingScreen onDone={() => { setOnboarded(true); setScreen('home'); }} />;
-  if (screen === 'camera') return <BattleScreen battleSession={battleSession} onRematch={setBattleSession} onSessionExpired={clearBattleSession} onExit={() => { setBattleSession(null); setScreen('home'); }} />;
-  if (screen === 'multiplayer') return <BattleLobbyScreen onSessionExpired={clearBattleSession} onBack={() => { setBattleSession(null); navigateFromMenu('home'); }} onStart={(session) => { setBattleSession(session); setScreen('camera'); }} />;
+  if (screen === 'camera') return <BattleScreen onExit={() => setScreen('home')} />;
   if (screen === 'settings') return <SettingsScreen onBack={() => navigateFromMenu('home')} />;
   if (screen === 'armory') return <WeaponSelectionScreen onBack={() => navigateFromMenu('home')} onCamera={() => { setScreen('home'); setSoloGateVisible(true); }} />;
   if (screen === 'store') return <StoreScreen onBack={() => navigateFromMenu('home')} />;
   return (
     <>
-      <HomeScreen onNavigate={navigateFromMenu} onOpenCamera={openSoloCamera} onOpenTeamBattle={openTeamBattle} />
+      <HomeScreen onNavigate={navigateFromMenu} onOpenCamera={openSoloCamera} />
       <EconomyGate
         visible={soloGateVisible}
         action="soloEntry"

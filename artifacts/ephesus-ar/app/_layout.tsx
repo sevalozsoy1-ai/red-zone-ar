@@ -14,9 +14,8 @@ import {
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { GameProvider } from '@/context/GameContext';
-import { setAuthTokenGetter, setBaseUrl } from '@workspace/api-client-react';
+import { setBaseUrl } from '@workspace/api-client-react';
 import { resolveApiConfig } from '@/lib/api-config';
-import { getBattleSessionToken } from '@/lib/battle-auth';
 
 // Expo Go runs the JavaScript bundle on the phone, so relative `/api` URLs
 // would otherwise point at the phone instead of the Replit API service.  Keep
@@ -25,7 +24,6 @@ import { getBattleSessionToken } from '@/lib/battle-auth';
 // refused before any API request can be made when incomplete.
 const apiConfig = resolveApiConfig();
 setBaseUrl(apiConfig.baseUrl);
-setAuthTokenGetter(getBattleSessionToken);
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();

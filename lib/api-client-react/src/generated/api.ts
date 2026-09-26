@@ -20,12 +20,9 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
-  BattleJoinInput,
-  BattleSession,
-  BattleShotResult,
-  GetBattleStateParams,
   HealthStatus,
-  NetworkBattleShotInput
+  VisionTargetRequest,
+  VisionTargetResult
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -133,25 +130,26 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
 
 
 
-export const getCreateBattleRoomUrl = () => {
+export const getClassifyVisionTargetUrl = () => {
 
 
 
 
-  return `/api/battle/rooms`
+  return `/api/vision/classify`
 }
 
 /**
- * @summary Create a battle room
+ * Only called after the player explicitly enables optional AI image analysis. The frame is not stored by this app.
+ * @summary Identify the object under the camera sight in a single frame
  */
-export const createBattleRoom = async (battleJoinInput: BattleJoinInput, options?: Parameters<typeof customFetch>[1]): Promise<BattleSession> => {
+export const classifyVisionTarget = async (visionTargetRequest: VisionTargetRequest, options?: Parameters<typeof customFetch>[1]): Promise<VisionTargetResult> => {
 
-  return customFetch<BattleSession>(getCreateBattleRoomUrl(),
+  return customFetch<VisionTargetResult>(getClassifyVisionTargetUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(battleJoinInput)
+    body: JSON.stringify(visionTargetRequest)
   }
 );}
 
@@ -159,11 +157,11 @@ export const createBattleRoom = async (battleJoinInput: BattleJoinInput, options
 
 
 
-export const getCreateBattleRoomMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createBattleRoom>>, TError,{data: BodyType<BattleJoinInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof createBattleRoom>>, TError,{data: BodyType<BattleJoinInput>}, TContext> => {
+export const getClassifyVisionTargetMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof classifyVisionTarget>>, TError,{data: BodyType<VisionTargetRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof classifyVisionTarget>>, TError,{data: BodyType<VisionTargetRequest>}, TContext> => {
 
-const mutationKey = ['createBattleRoom'];
+const mutationKey = ['classifyVisionTarget'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -173,10 +171,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createBattleRoom>>, {data: BodyType<BattleJoinInput>}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof classifyVisionTarget>>, {data: BodyType<VisionTargetRequest>}> = (props) => {
           const {data} = props ?? {};
 
-          return  createBattleRoom(data,requestOptions)
+          return  classifyVisionTarget(data,requestOptions)
         }
 
 
@@ -186,462 +184,21 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type CreateBattleRoomMutationResult = NonNullable<Awaited<ReturnType<typeof createBattleRoom>>>
-    export type CreateBattleRoomMutationBody = BodyType<BattleJoinInput>
-    export type CreateBattleRoomMutationError = ErrorType<unknown>
+    export type ClassifyVisionTargetMutationResult = NonNullable<Awaited<ReturnType<typeof classifyVisionTarget>>>
+    export type ClassifyVisionTargetMutationBody = BodyType<VisionTargetRequest>
+    export type ClassifyVisionTargetMutationError = ErrorType<void>
 
     /**
- * @summary Create a battle room
+ * @summary Identify the object under the camera sight in a single frame
  */
-export const useCreateBattleRoom = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createBattleRoom>>, TError,{data: BodyType<BattleJoinInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+export const useClassifyVisionTarget = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof classifyVisionTarget>>, TError,{data: BodyType<VisionTargetRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
-        Awaited<ReturnType<typeof createBattleRoom>>,
+        Awaited<ReturnType<typeof classifyVisionTarget>>,
         TError,
-        {data: BodyType<BattleJoinInput>},
+        {data: BodyType<VisionTargetRequest>},
         TContext
       > => {
-      return useMutation(getCreateBattleRoomMutationOptions(options));
-    }
-
-export const getJoinBattleRoomUrl = (code: string,) => {
-
-
-
-
-  return `/api/battle/rooms/${code}/players`
-}
-
-/**
- * @summary Join a battle room
- */
-export const joinBattleRoom = async (code: string,
-    battleJoinInput: BattleJoinInput, options?: Parameters<typeof customFetch>[1]): Promise<BattleSession> => {
-
-  return customFetch<BattleSession>(getJoinBattleRoomUrl(code),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(battleJoinInput)
-  }
-);}
-
-
-
-
-
-export const getJoinBattleRoomMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof joinBattleRoom>>, TError,{code: string;data: BodyType<BattleJoinInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof joinBattleRoom>>, TError,{code: string;data: BodyType<BattleJoinInput>}, TContext> => {
-
-const mutationKey = ['joinBattleRoom'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof joinBattleRoom>>, {code: string;data: BodyType<BattleJoinInput>}> = (props) => {
-          const {code,data} = props ?? {};
-
-          return  joinBattleRoom(code,data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type JoinBattleRoomMutationResult = NonNullable<Awaited<ReturnType<typeof joinBattleRoom>>>
-    export type JoinBattleRoomMutationBody = BodyType<BattleJoinInput>
-    export type JoinBattleRoomMutationError = ErrorType<unknown>
-
-    /**
- * @summary Join a battle room
- */
-export const useJoinBattleRoom = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof joinBattleRoom>>, TError,{code: string;data: BodyType<BattleJoinInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof joinBattleRoom>>,
-        TError,
-        {code: string;data: BodyType<BattleJoinInput>},
-        TContext
-      > => {
-      return useMutation(getJoinBattleRoomMutationOptions(options));
-    }
-
-export const getGetBattleStateUrl = (params: GetBattleStateParams,) => {
-  const normalizedParams = new URLSearchParams();
-
-  Object.entries(params || {}).forEach(([key, value]) => {
-
-    if (value !== undefined) {
-      normalizedParams.append(key, value === null ? 'null' : String(value))
-    }
-  });
-
-  const stringifiedParams = normalizedParams.toString();
-
-  return stringifiedParams.length > 0 ? `/api/battle/state?${stringifiedParams}` : `/api/battle/state`
-}
-
-/**
- * @summary Get current room state
- */
-export const getBattleState = async (params: GetBattleStateParams, options?: Parameters<typeof customFetch>[1]): Promise<BattleSession> => {
-
-  return customFetch<BattleSession>(getGetBattleStateUrl(params),
-  {
-    ...options,
-    method: 'GET'
-
-
-  }
-);}
-
-
-
-
-
-export const getGetBattleStateQueryKey = (params?: GetBattleStateParams,) => {
-    return [
-    `/api/battle/state`, ...(params ? [params] : [])
-    ] as const;
-    }
-
-
-export const getGetBattleStateQueryOptions = <TData = Awaited<ReturnType<typeof getBattleState>>, TError = ErrorType<unknown>>(params: GetBattleStateParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getBattleState>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
-) => {
-
-const {query: queryOptions, request: requestOptions} = options ?? {};
-
-  const queryKey =  queryOptions?.queryKey ?? getGetBattleStateQueryKey(params);
-
-
-
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getBattleState>>> = ({ signal }) => getBattleState(params, { signal, ...requestOptions });
-
-
-
-
-
-   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getBattleState>>, TError, TData> & { queryKey: QueryKey }
-}
-
-export type GetBattleStateQueryResult = NonNullable<Awaited<ReturnType<typeof getBattleState>>>
-export type GetBattleStateQueryError = ErrorType<unknown>
-
-
-/**
- * @summary Get current room state
- */
-
-export function useGetBattleState<TData = Awaited<ReturnType<typeof getBattleState>>, TError = ErrorType<unknown>>(
- params: GetBattleStateParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getBattleState>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
-
- ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-
-  const queryOptions = getGetBattleStateQueryOptions(params,options)
-
-  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
-
-  return withQueryKey(query, queryOptions.queryKey);
-}
-
-
-
-
-
-
-
-export const getStartBattleRoomUrl = (code: string,) => {
-
-
-
-
-  return `/api/battle/rooms/${code}/start`
-}
-
-/**
- * @summary Start a battle
- */
-export const startBattleRoom = async (code: string, options?: Parameters<typeof customFetch>[1]): Promise<BattleSession> => {
-
-  return customFetch<BattleSession>(getStartBattleRoomUrl(code),
-  {
-    ...options,
-    method: 'POST'
-
-
-  }
-);}
-
-
-
-
-
-export const getStartBattleRoomMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startBattleRoom>>, TError,{code: string}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof startBattleRoom>>, TError,{code: string}, TContext> => {
-
-const mutationKey = ['startBattleRoom'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startBattleRoom>>, {code: string}> = (props) => {
-          const {code} = props ?? {};
-
-          return  startBattleRoom(code,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type StartBattleRoomMutationResult = NonNullable<Awaited<ReturnType<typeof startBattleRoom>>>
-
-    export type StartBattleRoomMutationError = ErrorType<unknown>
-
-    /**
- * @summary Start a battle
- */
-export const useStartBattleRoom = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startBattleRoom>>, TError,{code: string}, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof startBattleRoom>>,
-        TError,
-        {code: string},
-        TContext
-      > => {
-      return useMutation(getStartBattleRoomMutationOptions(options));
-    }
-
-export const getLeaveBattleRoomUrl = (code: string,) => {
-
-
-
-
-  return `/api/battle/rooms/${code}/session`
-}
-
-/**
- * @summary Leave a battle room
- */
-export const leaveBattleRoom = async (code: string, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
-
-  return customFetch<void>(getLeaveBattleRoomUrl(code),
-  {
-    ...options,
-    method: 'DELETE'
-
-
-  }
-);}
-
-
-
-
-
-export const getLeaveBattleRoomMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof leaveBattleRoom>>, TError,{code: string}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof leaveBattleRoom>>, TError,{code: string}, TContext> => {
-
-const mutationKey = ['leaveBattleRoom'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof leaveBattleRoom>>, {code: string}> = (props) => {
-          const {code} = props ?? {};
-
-          return  leaveBattleRoom(code,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type LeaveBattleRoomMutationResult = NonNullable<Awaited<ReturnType<typeof leaveBattleRoom>>>
-
-    export type LeaveBattleRoomMutationError = ErrorType<unknown>
-
-    /**
- * @summary Leave a battle room
- */
-export const useLeaveBattleRoom = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof leaveBattleRoom>>, TError,{code: string}, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof leaveBattleRoom>>,
-        TError,
-        {code: string},
-        TContext
-      > => {
-      return useMutation(getLeaveBattleRoomMutationOptions(options));
-    }
-
-export const getHeartbeatBattleRoomUrl = (code: string,) => {
-
-
-
-
-  return `/api/battle/rooms/${code}/heartbeat`
-}
-
-/**
- * @summary Renew a battle session lease
- */
-export const heartbeatBattleRoom = async (code: string, options?: Parameters<typeof customFetch>[1]): Promise<BattleSession> => {
-
-  return customFetch<BattleSession>(getHeartbeatBattleRoomUrl(code),
-  {
-    ...options,
-    method: 'POST'
-
-
-  }
-);}
-
-
-
-
-
-export const getHeartbeatBattleRoomMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof heartbeatBattleRoom>>, TError,{code: string}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof heartbeatBattleRoom>>, TError,{code: string}, TContext> => {
-
-const mutationKey = ['heartbeatBattleRoom'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof heartbeatBattleRoom>>, {code: string}> = (props) => {
-          const {code} = props ?? {};
-
-          return  heartbeatBattleRoom(code,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type HeartbeatBattleRoomMutationResult = NonNullable<Awaited<ReturnType<typeof heartbeatBattleRoom>>>
-
-    export type HeartbeatBattleRoomMutationError = ErrorType<unknown>
-
-    /**
- * @summary Renew a battle session lease
- */
-export const useHeartbeatBattleRoom = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof heartbeatBattleRoom>>, TError,{code: string}, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof heartbeatBattleRoom>>,
-        TError,
-        {code: string},
-        TContext
-      > => {
-      return useMutation(getHeartbeatBattleRoomMutationOptions(options));
-    }
-
-export const getFireNetworkBattleShotUrl = (code: string,) => {
-
-
-
-
-  return `/api/battle/rooms/${code}/network-shots`
-}
-
-/**
- * @summary Submit an idempotent player-targeted network shot
- */
-export const fireNetworkBattleShot = async (code: string,
-    networkBattleShotInput: NetworkBattleShotInput, options?: Parameters<typeof customFetch>[1]): Promise<BattleShotResult> => {
-
-  return customFetch<BattleShotResult>(getFireNetworkBattleShotUrl(code),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(networkBattleShotInput)
-  }
-);}
-
-
-
-
-
-export const getFireNetworkBattleShotMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof fireNetworkBattleShot>>, TError,{code: string;data: BodyType<NetworkBattleShotInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof fireNetworkBattleShot>>, TError,{code: string;data: BodyType<NetworkBattleShotInput>}, TContext> => {
-
-const mutationKey = ['fireNetworkBattleShot'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof fireNetworkBattleShot>>, {code: string;data: BodyType<NetworkBattleShotInput>}> = (props) => {
-          const {code,data} = props ?? {};
-
-          return  fireNetworkBattleShot(code,data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type FireNetworkBattleShotMutationResult = NonNullable<Awaited<ReturnType<typeof fireNetworkBattleShot>>>
-    export type FireNetworkBattleShotMutationBody = BodyType<NetworkBattleShotInput>
-    export type FireNetworkBattleShotMutationError = ErrorType<unknown>
-
-    /**
- * @summary Submit an idempotent player-targeted network shot
- */
-export const useFireNetworkBattleShot = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof fireNetworkBattleShot>>, TError,{code: string;data: BodyType<NetworkBattleShotInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof fireNetworkBattleShot>>,
-        TError,
-        {code: string;data: BodyType<NetworkBattleShotInput>},
-        TContext
-      > => {
-      return useMutation(getFireNetworkBattleShotMutationOptions(options));
+      return useMutation(getClassifyVisionTargetMutationOptions(options));
     }
 

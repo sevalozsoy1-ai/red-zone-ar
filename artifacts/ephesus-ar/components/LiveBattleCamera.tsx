@@ -51,6 +51,7 @@ export default function LiveBattleCamera({
   onFacingUnavailable,
   fireSignal,
   flashlightEnabled = true,
+  torchOn = false,
 }: LiveBattleCameraProps) {
   const { locale, t } = useI18n();
   const cameraRef = useRef<CameraView | null>(null);
@@ -260,6 +261,7 @@ export default function LiveBattleCamera({
           width: decoded.width,
           height: decoded.height,
           data: decoded.data,
+          capturedAt: startedAt,
         });
       }
     } catch (error) {
@@ -399,13 +401,13 @@ export default function LiveBattleCamera({
     >
       {permission?.granted && appActive ? (
         <CameraView
-          key={`${restartKey}-${appActive ? "active" : "paused"}`}
+          key={`${restartKey}-${facing}-${appActive ? "active" : "paused"}`}
           ref={cameraRef}
           style={StyleSheet.absoluteFill}
           // Expo Camera defaults to the rear camera, but keep this explicit so
           // the first launch prefers it while tablets can switch to selfie mode.
           facing={facing}
-          enableTorch={facing === "back" && torchEnabled}
+          enableTorch={facing === "back" && appActive && (torchOn || torchEnabled)}
           // 0 is the unzoomed native lens position. Digital zoom belongs only
           // to the battle scope animation, not to the camera preview.
           zoom={0}

@@ -20,8 +20,8 @@ test('native weapon replay pauses before seeking on Android', () => {
 });
 
 test('sustained fire does not enqueue native session activation per shot', () => {
-  const playbackStart = hookSource.indexOf('sessionReady.current, pool.ready');
-  const playbackEnd = hookSource.indexOf('.then(() => {', playbackStart);
+  const playbackStart = hookSource.indexOf('const sessionAtRequest = sessionReady.current;');
+  const playbackEnd = hookSource.indexOf('const playShot =', playbackStart);
 
   assert.notEqual(playbackStart, -1, 'shot playback waits for shared session readiness');
   assert.notEqual(playbackEnd, -1, 'shot playback chain has a completion step');
@@ -37,4 +37,21 @@ test('the manual sound retry replaces a rejected session activation', () => {
   assert.ok(retry);
   assert.match(retry, /sessionReady\.current = activateNativeAudioSession\(\)/);
   assert.match(retry, /disposePool\(id\)/);
+});
+
+test('a rejected session can recover automatically without a manual sound-test tap', () => {
+  assert.match(hookSource, /const recoverNativeAudioSession = useCallback/);
+  assert.match(hookSource, /const sessionAtRequest = sessionReady\.current;/);
+  assert.match(hookSource, /recoverNativeAudioSession\(\)\s*\.then\(\(\) => playWhenReady\(\)\)/);
+});
+
+test('playing, loading, queued, and leased pools are protected from LRU eviction', () => {
+  assert.match(hookSource, /busy: pool\.coordinator\.busyCount > 0,/);
+  assert.match(hookSource, /playing: pool\.players\.some\(\(player\) => player\.currentStatus\.playing\),/);
+  assert.match(hookSource, /loading: !pool\.readySettled,/);
+  assert.match(hookSource, /queued: queuedRequests\.current\.has\(key\),/);
+  assert.match(hookSource, /pendingRequest: pool\.pendingRequests > 0,/);
+  assert.match(hookSource, /created\.ready = waitForAnyAudioPlayerReady\(players\)\.then/);
+  assert.match(hookSource, /playbackStatusUpdate',\s*\(\) => trimIdlePools\(key\)/);
+  assert.match(hookSource, /pool\.subscriptions\.forEach\(\(subscription\) =>/);
 });

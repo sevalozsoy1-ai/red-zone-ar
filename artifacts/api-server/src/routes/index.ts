@@ -1,10 +1,10 @@
 import { Router, type IRouter } from "express";
 import healthRouter from "./health";
-import battleRouter from "./battle";
+import visionRouter from "./vision";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
-router.use(battleRouter);
+router.use(visionRouter);
 
 export default router;

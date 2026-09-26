@@ -191,75 +191,50 @@ const ActionEffect = ({ action, fireAnim, weaponId }: { action: WeaponAction; fi
   }
 };
 
-const GrenadeImpact = ({ fireAnim, weaponId }: { fireAnim: Animated.Value; weaponId: WeaponId }) => {
-  if (weaponId === 'frag-grenade') {
-    const blastScale = fireAnim.interpolate({ inputRange: [0, 0.05, 0.15], outputRange: [1.8, 1.5, 0.2] });
-    const blastOpacity = fireAnim.interpolate({ inputRange: [0, 0.05, 0.1, 0.15], outputRange: [0, 0.8, 1, 0] });
-    const shardScale = fireAnim.interpolate({ inputRange: [0, 0.15], outputRange: [2, 0.1] });
-    return (
-      <View style={styles.impactContainer}>
-        <Animated.View style={[styles.fragBlast, { opacity: blastOpacity, transform: [{ scale: blastScale }] }]} />
-        <Animated.View style={[styles.fragCore, { opacity: blastOpacity, transform: [{ scale: blastScale }] }]} />
-        <Animated.View style={[styles.fragShard, { opacity: blastOpacity, transform: [{ scale: shardScale }, { translateX: -40 }, { translateY: -50 }, { rotate: '-40deg' }] }]} />
-        <Animated.View style={[styles.fragShard, { opacity: blastOpacity, transform: [{ scale: shardScale }, { translateX: 40 }, { translateY: -40 }, { rotate: '40deg' }] }]} />
-        <Animated.View style={[styles.fragShard, { opacity: blastOpacity, transform: [{ scale: shardScale }, { translateX: -40 }, { translateY: 50 }, { rotate: '-140deg' }] }]} />
-        <Animated.View style={[styles.fragShard, { opacity: blastOpacity, transform: [{ scale: shardScale }, { translateX: 40 }, { translateY: 50 }, { rotate: '140deg' }] }]} />
-      </View>
-    );
-  }
-
-  if (weaponId === 'flashbang') {
-    const flashScale = fireAnim.interpolate({ inputRange: [0, 0.1, 0.15], outputRange: [4, 1.5, 0.1] });
-    const flashOpacity = fireAnim.interpolate({ inputRange: [0, 0.05, 0.15], outputRange: [0, 1, 0] });
-    return (
-      <View style={styles.impactContainer}>
-        <Animated.View style={[styles.flashbangCore, { opacity: flashOpacity, transform: [{ scale: flashScale }] }]} />
-        <Animated.View style={[styles.flashbangGlare, { opacity: flashOpacity, transform: [{ scale: flashScale }, { rotate: '45deg' }] }]} />
-        <Animated.View style={[styles.flashbangGlare, { opacity: flashOpacity, transform: [{ scale: flashScale }, { rotate: '-45deg' }] }]} />
-      </View>
-    );
-  }
-
-  if (weaponId === 'smoke-grenade') {
-    const smokeScale = fireAnim.interpolate({ inputRange: [0, 0.1, 0.15], outputRange: [3.5, 1, 0.1] });
-    const smokeOpacity = fireAnim.interpolate({ inputRange: [0, 0.02, 0.1, 0.15], outputRange: [0, 0.8, 1, 0] });
-    return (
-      <View style={styles.impactContainer}>
-        <Animated.View style={[styles.smokeCloud, { width: 140, height: 140, left: -70, top: -70, opacity: smokeOpacity, transform: [{ scale: smokeScale }, { translateX: -30 }, { translateY: -10 }] }]} />
-        <Animated.View style={[styles.smokeCloud, { width: 120, height: 120, left: -60, top: -60, backgroundColor: 'rgba(130, 145, 155, 0.9)', opacity: smokeOpacity, transform: [{ scale: smokeScale }, { translateX: 30 }, { translateY: -25 }] }]} />
-        <Animated.View style={[styles.smokeCloud, { width: 160, height: 160, left: -80, top: -80, opacity: smokeOpacity, transform: [{ scale: smokeScale }, { translateY: 20 }] }]} />
-      </View>
-    );
-  }
-
-  return null;
-};
-
-const GrenadeEffect = ({ fireAnim, weaponId }: { fireAnim: Animated.Value; weaponId: WeaponId }) => {
-  const projY = fireAnim.interpolate({ inputRange: [0, 0.15, 1], outputRange: [-250, -250, 100] });
-  const projScale = fireAnim.interpolate({ inputRange: [0, 0.15, 1], outputRange: [0.15, 0.15, 0.8] });
-  const projRotate = fireAnim.interpolate({ inputRange: [0, 1], outputRange: ['720deg', '0deg'] });
-  const projOpacity = fireAnim.interpolate({ inputRange: [0, 0.05, 0.15, 0.95, 1], outputRange: [0, 0, 1, 1, 0] });
-
+const ProjectileFlight = ({ animation, target, width, height, weaponId, rocket }: {
+  animation: Animated.Value;
+  target: KnifeThrowTarget;
+  width: number;
+  height: number;
+  weaponId: WeaponId;
+  rocket: boolean;
+}) => {
+  const originX = width / 2 + (rocket ? 38 : 0);
+  const originY = height - (rocket ? 170 : 150);
+  const opacity = animation.interpolate({ inputRange: [0, 0.03, 0.88, 1], outputRange: [0, 1, 1, 0] });
+  const scale = animation.interpolate({ inputRange: [0, 0.35, 1], outputRange: [1.25, 0.95, 0.22] });
   return (
-    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-      <Animated.View
-        style={[
-          styles.grenadeProjectile,
-          {
-            opacity: projOpacity,
-            transform: [
-              { translateY: projY },
-              { scale: projScale },
-              { rotate: projRotate },
-            ],
-          },
-        ]}
-      >
+    <Animated.View
+      pointerEvents="none"
+      testID={rocket ? 'rocket-projectile' : 'grenade-projectile'}
+      style={[styles.flight, {
+        left: originX - 30, top: originY - 40, opacity,
+        transform: [
+          { translateX: animation.interpolate({ inputRange: [0, 1], outputRange: [0, target.x - (rocket ? 38 : 0)] }) },
+          { translateY: animation.interpolate({ inputRange: [0, 0.38, 1], outputRange: [0, -90, height / 2 + target.y - originY] }) },
+          { scale },
+          ...(rocket ? [] : [{ rotate: animation.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '690deg'] }) }]),
+        ],
+      }]}
+    >
+      {rocket ? (
+        <View style={styles.rocketShell}>
+          <View style={styles.rocketNose} />
+          <View style={styles.rocketBody}>
+            <View style={styles.rocketStripe} />
+          </View>
+          <View style={styles.rocketFins}>
+            <View style={styles.rocketFin} /><View style={styles.rocketFin} />
+          </View>
+          <Animated.View style={[styles.rocketExhaust, {
+            opacity: animation.interpolate({ inputRange: [0, 0.15, 0.9, 1], outputRange: [0.8, 1, 0.95, 0] }),
+            transform: [{ scaleY: animation.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0.6, 1.5, 0.7] }) }],
+          }]} />
+        </View>
+      ) : (
         <Image source={WEAPON_IMAGES[weaponId]} resizeMode="contain" style={styles.image} />
-      </Animated.View>
-      <GrenadeImpact fireAnim={fireAnim} weaponId={weaponId} />
-    </View>
+      )}
+    </Animated.View>
   );
 };
 
@@ -417,10 +392,9 @@ export default function WeaponView({ weaponId, archetype, aimAnim, fireAnim, rec
           >
             {isGrenade ? (
               <>
-                <GrenadeEffect fireAnim={fireAnim} weaponId={weaponId} />
                 <Animated.View style={[styles.heldGrenadeContainer, {
-                  opacity: fireAnim.interpolate({ inputRange: [0, 0.1, 0.2, 1], outputRange: [1, 1, 0, 0] }),
-                  transform: [{ translateY: fireAnim.interpolate({ inputRange: [0, 0.2, 1], outputRange: [0, 80, 80] }) }]
+                  opacity: knifeThrowAnim.interpolate({ inputRange: [0, 0.06, 0.9, 1], outputRange: [1, 0, 0, 1] }),
+                  transform: [{ translateY: knifeThrowAnim.interpolate({ inputRange: [0, 0.1, 0.9, 1], outputRange: [0, 80, 80, 0] }) }]
                 }]}>
                   <Image source={WEAPON_IMAGES[weaponId]} resizeMode="contain" style={styles.heldGrenadeImage} />
                 </Animated.View>
@@ -434,12 +408,23 @@ export default function WeaponView({ weaponId, archetype, aimAnim, fireAnim, rec
           </Animated.View>
         </Animated.View>
       </Animated.View>
+      {(isGrenade || action === 'launch') && (
+        <ProjectileFlight animation={knifeThrowAnim} target={knifeThrowTarget} width={width} height={height} weaponId={weaponId} rocket={action === 'launch'} />
+      )}
       {isKnife && <KnifeThrowProjectile animation={knifeThrowAnim} target={knifeThrowTarget} width={width} height={height} />}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  flight: { position: 'absolute', width: 60, height: 80, zIndex: 4, alignItems: 'center', justifyContent: 'center' },
+  rocketShell: { width: 44, height: 72, alignItems: 'center' },
+  rocketNose: { width: 23, height: 15, backgroundColor: '#cbd8cf', borderTopLeftRadius: 16, borderTopRightRadius: 16, borderWidth: 2, borderColor: '#526d69' },
+  rocketBody: { width: 23, height: 32, backgroundColor: '#a8b5a8', borderLeftWidth: 2, borderRightWidth: 2, borderColor: '#465856' },
+  rocketStripe: { width: '100%', height: 7, backgroundColor: '#b84135', marginTop: 10 },
+  rocketFins: { flexDirection: 'row', width: 40, justifyContent: 'space-between', marginTop: -7 },
+  rocketFin: { width: 10, height: 17, backgroundColor: '#8a9b8c', borderRadius: 2 },
+  rocketExhaust: { width: 12, height: 35, marginTop: -2, borderBottomLeftRadius: 10, borderBottomRightRadius: 10, backgroundColor: '#ff9f37', borderWidth: 3, borderColor: '#ffe38c' },
   container: {
     position: 'absolute',
     alignSelf: 'center',
