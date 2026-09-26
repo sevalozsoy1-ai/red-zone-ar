@@ -9,8 +9,6 @@ servers:
 tags:
   - name: health
     description: Health operations
-  - name: vision
-    description: Optional single-frame target recognition
 paths:
   /healthz:
     get:
@@ -25,33 +23,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
-  /vision/classify:
-    post:
-      operationId: classifyVisionTarget
-      tags: [vision]
-      summary: Identify the object under the camera sight in a single frame
-      description: Only called after the player explicitly enables optional AI image analysis. The frame is not stored by this app.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/VisionTargetRequest"
-      responses:
-        "200":
-          description: Recognition result
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/VisionTargetResult"
-        "400":
-          description: Invalid image or sight position
-        "429":
-          description: Daily or minute image-analysis quota reached
-        "502":
-          description: Image provider unavailable
-        "503":
-          description: Image analysis is not configured
 components:
   schemas:
     HealthStatus:
@@ -61,30 +32,3 @@ components:
           type: string
       required:
         - status
-    VisionTargetRequest:
-      type: object
-      properties:
-        imageBase64:
-          type: string
-          description: JPEG image, at most 60 KB of decoded data
-          maxLength: 85000
-        aimX:
-          type: number
-          minimum: 0
-          maximum: 1
-        aimY:
-          type: number
-          minimum: 0
-          maximum: 1
-      required: [imageBase64, aimX, aimY]
-    VisionTargetResult:
-      type: object
-      properties:
-        category:
-          type: string
-          enum: [car, truck, bus, motorcycle, bicycle, building, tree, other, none]
-        confidence:
-          type: number
-          minimum: 0
-          maximum: 1
-      required: [category, confidence]

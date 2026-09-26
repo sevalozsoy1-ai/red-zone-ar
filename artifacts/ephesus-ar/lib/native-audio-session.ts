@@ -1,6 +1,8 @@
 import { setAudioModeAsync, setIsAudioActiveAsync } from 'expo-audio';
+import { Platform } from 'react-native';
 
 import { createAudioSessionQueue } from '@/lib/audio-session-queue';
+import { audioInterruptionModeForPlatform } from '@/lib/audio-session-mode';
 
 /**
  * expo-audio's mode is process-wide. Keeping this behind one serialized
@@ -11,7 +13,7 @@ const NATIVE_AUDIO_MODE = {
   allowsRecording: false,
   playsInSilentMode: true,
   shouldPlayInBackground: false,
-  interruptionMode: 'mixWithOthers' as const,
+  interruptionMode: audioInterruptionModeForPlatform(Platform.OS),
 };
 
 let configured = false;

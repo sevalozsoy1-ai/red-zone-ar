@@ -17,34 +17,3 @@ export const HealthCheckResponse = zod.object({
 })
 
 
-/**
- * Only called after the player explicitly enables optional AI image analysis. The frame is not stored by this app.
- * @summary Identify the object under the camera sight in a single frame
- */
-export const classifyVisionTargetBodyImageBase64Max = 85000;
-
-export const classifyVisionTargetBodyAimXMin = 0;
-export const classifyVisionTargetBodyAimXMax = 1;
-
-export const classifyVisionTargetBodyAimYMin = 0;
-export const classifyVisionTargetBodyAimYMax = 1;
-
-
-
-export const ClassifyVisionTargetBody = zod.object({
-  "imageBase64": zod.string().max(classifyVisionTargetBodyImageBase64Max).describe('JPEG image, at most 60 KB of decoded data'),
-  "aimX": zod.number().min(classifyVisionTargetBodyAimXMin).max(classifyVisionTargetBodyAimXMax),
-  "aimY": zod.number().min(classifyVisionTargetBodyAimYMin).max(classifyVisionTargetBodyAimYMax)
-})
-
-export const classifyVisionTargetResponseConfidenceMin = 0;
-export const classifyVisionTargetResponseConfidenceMax = 1;
-
-
-
-export const ClassifyVisionTargetResponse = zod.object({
-  "category": zod.enum(['car', 'truck', 'bus', 'motorcycle', 'bicycle', 'building', 'tree', 'other', 'none']),
-  "confidence": zod.number().min(classifyVisionTargetResponseConfidenceMin).max(classifyVisionTargetResponseConfidenceMax)
-})
-
-

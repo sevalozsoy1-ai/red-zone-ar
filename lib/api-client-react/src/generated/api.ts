@@ -6,27 +6,21 @@
  * OpenAPI spec version: 0.1.0
  */
 import {
-  useMutation,
   useQuery
 } from '@tanstack/react-query';
 import type {
-  MutationFunction,
   QueryFunction,
   QueryKey,
-  UseMutationOptions,
-  UseMutationResult,
   UseQueryOptions,
   UseQueryResult
 } from '@tanstack/react-query';
 
 import type {
-  HealthStatus,
-  VisionTargetRequest,
-  VisionTargetResult
+  HealthStatus
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
-import type { ErrorType , BodyType } from '../custom-fetch';
+import type { ErrorType } from '../custom-fetch';
 
 type AwaitedInput<T> = PromiseLike<T> | T;
 
@@ -123,82 +117,3 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
 
   return withQueryKey(query, queryOptions.queryKey);
 }
-
-
-
-
-
-
-
-export const getClassifyVisionTargetUrl = () => {
-
-
-
-
-  return `/api/vision/classify`
-}
-
-/**
- * Only called after the player explicitly enables optional AI image analysis. The frame is not stored by this app.
- * @summary Identify the object under the camera sight in a single frame
- */
-export const classifyVisionTarget = async (visionTargetRequest: VisionTargetRequest, options?: Parameters<typeof customFetch>[1]): Promise<VisionTargetResult> => {
-
-  return customFetch<VisionTargetResult>(getClassifyVisionTargetUrl(),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(visionTargetRequest)
-  }
-);}
-
-
-
-
-
-export const getClassifyVisionTargetMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof classifyVisionTarget>>, TError,{data: BodyType<VisionTargetRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof classifyVisionTarget>>, TError,{data: BodyType<VisionTargetRequest>}, TContext> => {
-
-const mutationKey = ['classifyVisionTarget'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof classifyVisionTarget>>, {data: BodyType<VisionTargetRequest>}> = (props) => {
-          const {data} = props ?? {};
-
-          return  classifyVisionTarget(data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type ClassifyVisionTargetMutationResult = NonNullable<Awaited<ReturnType<typeof classifyVisionTarget>>>
-    export type ClassifyVisionTargetMutationBody = BodyType<VisionTargetRequest>
-    export type ClassifyVisionTargetMutationError = ErrorType<void>
-
-    /**
- * @summary Identify the object under the camera sight in a single frame
- */
-export const useClassifyVisionTarget = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof classifyVisionTarget>>, TError,{data: BodyType<VisionTargetRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof classifyVisionTarget>>,
-        TError,
-        {data: BodyType<VisionTargetRequest>},
-        TContext
-      > => {
-      return useMutation(getClassifyVisionTargetMutationOptions(options));
-    }
-

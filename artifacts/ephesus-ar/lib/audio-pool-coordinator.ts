@@ -73,7 +73,10 @@ export function createAudioPoolCoordinator<T>(
           release: () => {
             if (released) return;
             released = true;
-            slot.busy = false;
+            // A disposed pool may be invalidated and leased again before
+            // this async seek/play operation settles. Its old lease must
+            // never free the slot owned by the replacement generation.
+            if (generation === leaseGeneration) slot.busy = false;
           },
         };
       }

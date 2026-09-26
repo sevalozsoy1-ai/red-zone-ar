@@ -28,6 +28,22 @@ test('invalidating a replaced pool makes old async work stale', () => {
   assert.ok(pool.acquire());
 });
 
+test('an old async lease cannot release a slot reused after foreground recovery', () => {
+  const pool = createAudioPoolCoordinator(['a']);
+  const staleLease = pool.acquire();
+  assert.ok(staleLease);
+
+  pool.invalidate();
+  const resumedLease = pool.acquire();
+  assert.ok(resumedLease);
+  staleLease.release();
+
+  assert.equal(pool.busyCount, 1, 'the resumed request still owns the player');
+  assert.equal(pool.acquire(), null, 'a late completion cannot lease the same player twice');
+  resumedLease.release();
+  assert.equal(pool.busyCount, 0);
+});
+
 test('bounded pools reject overlap instead of allocating unbounded players', () => {
   const pool = createAudioPoolCoordinator(['a', 'b']);
   const first = pool.acquire();

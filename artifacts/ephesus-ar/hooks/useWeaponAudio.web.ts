@@ -236,6 +236,7 @@ export function useWeaponAudio(): WeaponAudio {
     const sounds: Record<EnemyVariant, SoundKey> = {
       rifle: 'enemy-shot', scout: 'enemy-scout', heavy: 'enemy-heavy',
       sniper: 'enemy-sniper', rocketeer: 'enemy-rocket', cobra: 'enemy-cobra-shot', tank: 'enemy-rocket', jet: 'enemy-cobra-shot', sidecar: 'enemy-heavy',
+      'mortar-team': 'enemy-rocket', 'machinegun-team': 'enemy-heavy', squad: 'enemy-shot', laser: 'enemy-shot', robot: 'enemy-heavy',
     };
     play(sounds[variant]);
   }, [play]);

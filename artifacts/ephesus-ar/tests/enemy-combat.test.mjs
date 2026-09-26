@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  advanceEnemyCombat, enemyAimCenter, enemyCenter, hideEnemy, hitMedkitDrop, hitPeekingEnemy, medkitAimCenter, projectileProgress, scheduleEnemyAppearance, tankProgress, weaponDamage,
+  advanceEnemyCombat, enemyAimCenter, enemyCenter, enemyMemberAimCenter, hideEnemy, hitMedkitDrop, hitPeekingEnemy, medkitAimCenter, projectileProgress, scheduleEnemyAppearance, shiftEnemyCombatTime, squadGrenadeSuggestion, tankProgress, tankTurretAngle, weaponDamage,
   PLAYER_HEALTH, startEnemyRound,
 } from '../lib/enemy-combat.ts';
 import { automaticSoundIntervalMs, heldShotIntervalMs } from '../lib/automatic-fire.ts';
@@ -366,4 +366,136 @@ test('automatic fire and sound are continuous at every catalog cadence; scope la
   assert.equal(automaticSoundIntervalMs({ interval: 50, automatic: true }), 75);
   assert.equal(effectiveScopeZoom(1.25), 2.15);
   assert.equal(effectiveScopeZoom(4), 4);
+});
+
+test('mortar crew completes a visible setup before launching a damaging shell', () => {
+  let round = revealNext(startEnemyRound(0), 0.1);
+  assert.equal(round.enemy.variant, 'mortar-team');
+  assert.equal(round.enemy.members.length, 2);
+  assert.equal(round.enemy.firesAt - round.enemy.appearedAt, 4300);
+  assert.equal(advanceEnemyCombat(round, round.enemy.firesAt - 1, 0.1), round);
+  round = advanceEnemyCombat(round, round.enemy.firesAt, 0.1);
+  assert.equal(round.lastAttack.kind, 'launch');
+  assert.equal(round.projectile.variant, 'mortar-team');
+  assert.equal(round.health, 10, 'the shell is animated before impact');
+  const impact = advanceEnemyCombat(round, round.projectile.impactsAt, 0.1);
+  assert.equal(impact.health, 9);
+  assert.equal(impact.lastAttack.kind, 'impact');
+  const target = enemyMemberAimCenter(impact.enemy, impact.enemy.members[0], 402, 874, impact.enemy.appearedAt);
+  const woundedCrew = hitPeekingEnemy(impact, target, 402, 874, impact.enemy.appearedAt + 100);
+  assert.equal(woundedCrew.enemy.members.length, 1);
+  assert.equal(woundedCrew.enemy.fallen.length, 1);
+  assert.equal(woundedCrew.kills, 1);
+});
+
+test('machine-gun team assembles before sending a burst; a survivor keeps it dangerous', () => {
+  let round = revealNext(startEnemyRound(0), 0.26);
+  assert.equal(round.enemy.variant, 'machinegun-team');
+  assert.equal(round.enemy.members.length, 2);
+  assert.equal(round.enemy.firesAt - round.enemy.appearedAt, 2700);
+  assert.equal(advanceEnemyCombat(round, round.enemy.firesAt - 1, 0.26), round);
+  round = advanceEnemyCombat(round, round.enemy.firesAt, 0.26);
+  assert.equal(round.enemy.shotsFired, 1);
+  assert.equal(round.lastAttack.kind, 'shot');
+  assert.equal(round.health, 10);
+  for (let shot = 1; shot < 6; shot += 1) round = advanceEnemyCombat(round, round.enemy.nextShotAt, 0.26);
+  assert.equal(round.enemy.shotsFired, 6);
+  assert.equal(round.health, 9);
+  const member = round.enemy.members[0];
+  const aim = enemyMemberAimCenter(round.enemy, member, 402, 874, round.enemy.appearedAt);
+  const wounded = hitPeekingEnemy(round, aim, 402, 874, round.enemy.appearedAt + 3000);
+  assert.equal(wounded.enemy.members.length, 1);
+  assert.equal(wounded.enemy.shotsFired, 6);
+});
+
+test('tank turret tracks the player while the vehicle crosses the screen', () => {
+  const round = revealNext(startEnemyRound(0), 0.73);
+  const tank = round.enemy;
+  const start = tankTurretAngle(tank, 402, 874, 0);
+  const middle = tankTurretAngle(tank, 402, 874, 0.5);
+  const end = tankTurretAngle(tank, 402, 874, 1);
+  assert.ok(start > middle);
+  assert.ok(middle > end);
+  assert.ok(start > 40 && start < 160);
+  assert.ok(end > 30 && end < 150);
+});
+
+test('single shots choose one nearest squad member at an overlap; blasts retain area damage', () => {
+  const round = revealNext(startEnemyRound(0), 0.36);
+  const squad = round.enemy;
+  const center = enemyAimCenter(squad, 402, 874, squad.appearedAt);
+  const aim = { x: center.x - 11.5, y: center.y };
+  const overlap = squad.members.filter((member) => {
+    const target = enemyMemberAimCenter(squad, member, 402, 874, squad.appearedAt);
+    return Math.abs(aim.x - target.x) <= 15 && Math.abs(aim.y - target.y) <= 24;
+  });
+  assert.equal(overlap.length, 4);
+
+  const shot = hitPeekingEnemy(round, aim, 402, 874, squad.appearedAt + 100, 1, WEAPONS[0]);
+  assert.equal(shot.kills, 1);
+  assert.equal(shot.enemy.members.length, 9);
+  assert.deepEqual(shot.enemy.fallen.map(({ member }) => member.id), [Math.min(...overlap.map(({ id }) => id))]);
+
+  const grenade = WEAPONS.find((weapon) => weapon.archetype === 'grenade' && weapon.id !== 'smoke-grenade' && weapon.id !== 'flashbang');
+  const blast = hitPeekingEnemy(round, aim, 402, 874, squad.appearedAt + 100, 1, grenade);
+  assert.ok(blast.kills > 1);
+  assert.equal(blast.kills, blast.enemy ? 10 - blast.enemy.members.length : 10);
+});
+
+test('ten-person squad members can be individually hit and grenades clear the formation', () => {
+  let round = revealNext(startEnemyRound(0), 0.36);
+  assert.equal(round.enemy.variant, 'squad');
+  assert.equal(round.enemy.members.length, 10);
+  assert.equal(squadGrenadeSuggestion('tr'), '10 KİŞİLİK TAKIM · EL BOMBASI ÖNERİLİR');
+  assert.equal(squadGrenadeSuggestion('en'), '10-PERSON SQUAD · GRENADE RECOMMENDED');
+  const squad = round.enemy;
+  const first = enemyMemberAimCenter(squad, squad.members[0], 402, 874, squad.appearedAt);
+  round = hitPeekingEnemy(round, first, 402, 874, squad.appearedAt + 100, 1, WEAPONS[0]);
+  assert.equal(round.enemy.members.length, 9);
+  assert.equal(round.kills, 1);
+  assert.equal(hitPeekingEnemy(round, first, 402, 874, squad.appearedAt + 150), round, 'a removed member cannot be hit twice');
+  const grenade = WEAPONS.find((weapon) => weapon.archetype === 'grenade' && weapon.id !== 'smoke-grenade' && weapon.id !== 'flashbang');
+  assert.ok(grenade);
+  const formationCenter = enemyAimCenter(round.enemy, 402, 874, round.enemy.appearedAt);
+  round = hitPeekingEnemy(round, formationCenter, 402, 874, round.enemy.appearedAt + 200, 1.7, grenade);
+  assert.equal(round.enemy, null);
+  assert.equal(round.kills, 10);
+  assert.equal(round.death.variant, 'squad');
+});
+
+test('laser soldiers and robots have distinct attacks and damage windows', () => {
+  let laser = revealNext(startEnemyRound(0), 0.48);
+  assert.equal(laser.enemy.variant, 'laser');
+  laser = advanceEnemyCombat(laser, laser.enemy.firesAt, 0.48);
+  assert.equal(laser.lastAttack.kind, 'laser');
+  assert.equal(laser.health, 9);
+
+  let robot = revealNext(startEnemyRound(0), 0.59);
+  assert.equal(robot.enemy.variant, 'robot');
+  assert.equal(robot.enemy.armor, 6);
+  robot = advanceEnemyCombat(robot, robot.enemy.firesAt, 0.59);
+  assert.equal(robot.lastAttack.kind, 'launch');
+  assert.equal(robot.projectile.variant, 'robot');
+  const robotImpact = advanceEnemyCombat(robot, robot.projectile.impactsAt, 0.59);
+  assert.equal(robotImpact.health, 9);
+});
+
+test('pause shifts all combat deadlines so setup, projectiles, deaths and drops resume in place', () => {
+  let warning = advanceEnemyCombat(startEnemyRound(0), startEnemyRound(0).nextAppearanceAt, 0.1);
+  warning = scheduleEnemyAppearance(warning, warning.warning.id, warning.nextAppearanceAt);
+  const pausedWarning = shiftEnemyCombatTime(warning, 30_000);
+  assert.equal(pausedWarning.warning.appearsAt, warning.warning.appearsAt + 30_000);
+  assert.equal(advanceEnemyCombat(pausedWarning, warning.warning.appearsAt + 1000, 0.1), pausedWarning);
+
+  let mortar = revealNext(startEnemyRound(0), 0.1);
+  const originalFiresAt = mortar.enemy.firesAt;
+  mortar = shiftEnemyCombatTime(mortar, 12_000);
+  assert.equal(mortar.enemy.firesAt, originalFiresAt + 12_000);
+  assert.equal(advanceEnemyCombat(mortar, originalFiresAt, 0.1), mortar);
+  mortar = advanceEnemyCombat(mortar, mortar.enemy.firesAt, 0.1);
+  const originalImpactAt = mortar.projectile.impactsAt;
+  const pausedShell = shiftEnemyCombatTime(mortar, 25_000);
+  assert.equal(pausedShell.projectile.impactsAt, originalImpactAt + 25_000);
+  assert.equal(advanceEnemyCombat(pausedShell, originalImpactAt + 500, 0.1), pausedShell);
+  assert.equal(shiftEnemyCombatTime(pausedShell, 0), pausedShell);
 });

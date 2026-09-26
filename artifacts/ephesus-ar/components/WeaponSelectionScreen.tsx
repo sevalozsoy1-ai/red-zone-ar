@@ -11,14 +11,24 @@ import { WEAPONS } from '@/lib/weapons';
 
 export default function WeaponSelectionScreen({ onBack, onCamera }: { onBack: () => void; onCamera: () => void }) {
   const c = useColors();
-  const { t, rtl } = useI18n();
+  const { t, rtl, locale } = useI18n();
   const insets = useSafeAreaInsets();
   const { selectedWeapon, setSelectedWeapon, isWeaponUnlocked } = useGame();
   const selectedUnlocked = isWeaponUnlocked(selectedWeapon);
+  const selectedWeaponName = WEAPONS.find((weapon) => weapon.id === selectedWeapon)?.name ?? selectedWeapon;
   return <View style={[s.root, rtl && s.rtl, { backgroundColor: c.background, paddingTop: insets.top, paddingBottom: insets.bottom }]}>
-    <View style={s.header}>
+      <View style={s.header}>
       <Pressable onPress={onBack} accessibilityLabel={t('close')} style={s.back}><Feather name="arrow-left" size={22} color={c.foreground} /></Pressable>
-      <View style={s.heading}><Text style={[s.title, { color: c.foreground }]}>{t('equipmentSelection')}</Text><Text style={[s.subtitle, { color: c.mutedForeground }]}>{WEAPONS.length} · {t('equipmentSettings')}</Text></View>
+       <View style={s.heading}>
+         <Text style={[s.title, { color: c.foreground }]}>{t('equipmentSelection')}</Text>
+         <Text style={[s.subtitle, { color: c.mutedForeground }]}>{WEAPONS.length} · {t('equipmentSettings')}</Text>
+         <View testID="selected-weapon-summary" accessibilityLiveRegion="polite" style={s.selectedSummary}>
+           <Feather name="check-circle" size={14} color={c.cyan} />
+           <Text numberOfLines={1} style={[s.selectedSummaryText, { color: c.cyan }]}>
+             {locale === 'tr' ? `SEÇİLİ · ${selectedWeaponName}` : `SELECTED · ${selectedWeaponName}`}
+           </Text>
+         </View>
+       </View>
     </View>
     <View style={s.content}><WeaponCatalogList selectedWeapon={selectedWeapon} onSelect={setSelectedWeapon} /></View>
     <Pressable disabled={!selectedUnlocked} onPress={onCamera} style={[s.start, { backgroundColor: c.cyan }, !selectedUnlocked && s.disabledStart]}>
@@ -35,6 +45,8 @@ const s = StyleSheet.create({
   heading: { flex: 1, minWidth: 0 },
   title: { fontSize: 18, fontWeight: '800', letterSpacing: 1 },
   subtitle: { fontSize: 10, marginTop: 3 },
+  selectedSummary: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 5 },
+  selectedSummaryText: { minWidth: 0, flexShrink: 1, fontSize: 9, fontWeight: '900', letterSpacing: 0.5 },
   content: { flex: 1, minHeight: 0, paddingHorizontal: 20 },
   start: { marginHorizontal: 20, marginTop: 10, borderRadius: 14, minHeight: 56, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 8 },
   disabledStart: { opacity: 0.45 },

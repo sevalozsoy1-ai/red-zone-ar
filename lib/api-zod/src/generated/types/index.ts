@@ -7,6 +7,3 @@
  */
 
 export * from './healthStatus';
-export * from './visionTargetRequest';
-export * from './visionTargetResult';
-export * from './visionTargetResultCategory';

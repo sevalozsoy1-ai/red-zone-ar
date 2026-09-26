@@ -1,6 +1,6 @@
 import { createAudioPlayer, type AudioPlayer } from 'expo-audio';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 
 import { waitForAnyAudioPlayerReady } from '@/lib/audio-readiness';
 import {
@@ -19,6 +19,10 @@ import { WEAPON_SOUNDS } from '@/lib/weapon-assets';
 import { useGame } from '@/context/GameContext';
 import { effectiveEffectsVolume, effectiveWeaponVolume } from '@/lib/audio-settings';
 import { automaticSoundIntervalMs } from '@/lib/automatic-fire';
+import {
+  isCurrentAudioPlaybackRequest,
+  waitForAudioPlaybackProgress,
+} from '@/lib/audio-playback-confirmation';
 
 type SoundKey = WeaponId | 'reload' | 'enemy-shot' | 'enemy-scout' | 'enemy-heavy' | 'enemy-sniper' |
   'enemy-rocket' | 'enemy-cobra-shot' | 'enemy-impact' | 'enemy-rotor' |
@@ -71,12 +75,13 @@ export type WeaponAudio = {
 };
 
 export function useWeaponAudio(): WeaponAudio {
-  const { audioVolumes } = useGame();
+  const { audioVolumes, selectedWeapon } = useGame();
   const [error, setError] = useState<string | null>(null);
   const pools = useRef<Partial<PlayerPools>>({});
   const lastPlayed = useRef<Partial<Record<SoundKey, number>>>({});
   const queuedRequests = useRef(new Map<SoundKey, number>());
   const requestSequence = useRef(0);
+  const latestRequestByKey = useRef(new Map<SoundKey, number>());
   const poolRecency = useRef(new Map<SoundKey, number>());
   const poolSequence = useRef(0);
   const lifecycleGeneration = useRef(0);
@@ -89,6 +94,12 @@ export function useWeaponAudio(): WeaponAudio {
   // indefinitely during sustained fire on Android.
   const sessionReady = useRef<Promise<void>>(Promise.resolve());
   const mounted = useRef(true);
+  const selectedWeaponRef = useRef(selectedWeapon);
+  const weaponSelectionGeneration = useRef(0);
+  if (selectedWeaponRef.current !== selectedWeapon) {
+    selectedWeaponRef.current = selectedWeapon;
+    weaponSelectionGeneration.current += 1;
+  }
   // AppState.currentState can briefly be null/unknown while Expo Go finishes
   // attaching the bridge. Treat that startup state as usable rather than
   // dropping the first shot before the first AppState event arrives.
@@ -172,7 +183,8 @@ export function useWeaponAudio(): WeaponAudio {
         const player = createAudioPlayer(SOURCES[key], {
           // Keep short effects from deactivating the shared iOS audio session
           // as soon as one pooled player reaches its end.
-          keepAudioSessionActive: true,
+          keepAudioSessionActive: Platform.OS === 'ios',
+          updateInterval: 100,
           downloadFirst: true,
         });
         player.volume = isEffectsKey(key) ? effectiveEffectsVolume(audioVolumes) : effectiveWeaponVolume(audioVolumes) * gunScale(key);
@@ -292,6 +304,8 @@ export function useWeaponAudio(): WeaponAudio {
     // downloading. One deferred request is enough; subsequent automatic shots
     // will use the ready pool directly.
     if (queuedRequest !== undefined) return;
+    latestRequestByKey.current.set(key, requestId);
+    const selectionGeneration = weaponSelectionGeneration.current;
     const generation = lifecycleGeneration.current;
     const enemyGeneration = enemySoundGeneration.current;
     const rotorRequest = rotorGeneration.current;
@@ -299,7 +313,22 @@ export function useWeaponAudio(): WeaponAudio {
       && (key !== 'enemy-rotor' || rotorRequest === rotorGeneration.current);
     const isUsablePlayer = (candidate: AudioPlayer) =>
       candidate.isLoaded && !candidate.currentStatus.error;
+    const isCurrentRequestForPool = (targetPool: PlayerPool | undefined) =>
+      isCurrentAudioPlaybackRequest({
+        mounted: mounted.current,
+        active: active.current,
+        requestIsCurrent: latestRequestByKey.current.get(key) === requestId,
+        lifecycleIsCurrent: generation === lifecycleGeneration.current,
+        enemyIsCurrent: isCurrentEnemy(),
+        selectedWeaponIsCurrent: key === 'reload' || key.startsWith('enemy-')
+          || (selectedWeaponRef.current === key
+            && selectionGeneration === weaponSelectionGeneration.current),
+        pool: targetPool,
+        currentPool: pools.current[key],
+      });
+    let attemptedPool: PlayerPool | undefined = pool;
     const playFromPool = (targetPool: PlayerPool, retry: boolean): Promise<void> => {
+      attemptedPool = targetPool;
       const lease = targetPool.coordinator.acquire(isUsablePlayer);
       if (!lease) {
         // A pool can be ready because any one copy loaded while another copy
@@ -308,10 +337,14 @@ export function useWeaponAudio(): WeaponAudio {
         if (!retry && !targetPool.players.some(isUsablePlayer)) {
           disposePool(key);
           const rebuilt = ensurePool(key);
+            attemptedPool = rebuilt ?? undefined;
           if (rebuilt) {
             return Promise.all([activateNativeAudioSession(), rebuilt.ready])
               .then(() => playFromPool(rebuilt, true));
           }
+        }
+        if (retry && !targetPool.players.some(isUsablePlayer)) {
+          throw new Error('No usable audio player remained after retry');
         }
         return Promise.resolve();
       }
@@ -342,21 +375,36 @@ export function useWeaponAudio(): WeaponAudio {
               || !isCurrentEnemy()
               || !targetPool.coordinator.isCurrent(lease.generation)
             ) return;
+            const playbackProgress = waitForAudioPlaybackProgress(player);
             try {
               player.play();
-              setError(null);
             } catch {
               throw new Error('Audio player play failed');
             }
+            return playbackProgress.then((progressed) => {
+              if (
+                !mounted.current
+                || !active.current
+                || generation !== lifecycleGeneration.current
+                || !isCurrentEnemy()
+                || !targetPool.coordinator.isCurrent(lease.generation)
+              ) return;
+              if (!progressed) {
+                throw new Error('Audio player did not report playback progress');
+              }
+              if (isCurrentRequestForPool(targetPool)) setError(null);
+            });
           });
         })
         .catch((playError) => {
+          if (!isCurrentRequestForPool(targetPool)) throw playError;
           const hasUsableAlternative = targetPool.players.some(
             (candidate) => candidate !== lease.value && isUsablePlayer(candidate),
           );
           if (!retry && pools.current[key] === targetPool && !hasUsableAlternative) {
             disposePool(key);
             const rebuilt = ensurePool(key);
+            attemptedPool = rebuilt ?? undefined;
             if (rebuilt) {
               return Promise.all([activateNativeAudioSession(), rebuilt.ready])
                 .then(() => playFromPool(rebuilt, true));
@@ -402,14 +450,12 @@ export function useWeaponAudio(): WeaponAudio {
       });
     const handlePlaybackFailure = (playError: unknown) => {
         settlePendingRequest();
-        if (pools.current[key] !== pool) return;
         if (queuedRequests.current.get(key) === requestId) {
           queuedRequests.current.delete(key);
         }
-        disposePool(key);
-        if (mounted.current) {
-          setError('Ses oynatılamadı. Cihaz sesini açıp SESİ DENE düğmesine tekrar basın.');
-        }
+        if (!isCurrentRequestForPool(attemptedPool)) return;
+        if (attemptedPool) disposePool(key);
+        if (mounted.current) setError('Ses oynatılamadı. Cihaz sesini açıp SESİ DENE düğmesine tekrar basın.');
     };
     const sessionAtRequest = sessionReady.current;
     void sessionAtRequest.then(
@@ -438,7 +484,8 @@ export function useWeaponAudio(): WeaponAudio {
     const sounds: Record<EnemyVariant, SoundKey> = {
       rifle: 'enemy-shot', scout: 'enemy-scout', heavy: 'enemy-heavy',
       sniper: 'enemy-sniper', rocketeer: 'enemy-rocket', cobra: 'enemy-cobra-shot', tank: 'enemy-rocket', jet: 'enemy-cobra-shot',
-      sidecar: 'enemy-heavy',
+      sidecar: 'enemy-heavy', laser: 'enemy-shot', 'mortar-team': 'enemy-rocket',
+      'machinegun-team': 'enemy-heavy', squad: 'enemy-shot', robot: 'enemy-heavy',
     };
     play(sounds[variant]);
   }, [play]);
@@ -489,9 +536,12 @@ export function useWeaponAudio(): WeaponAudio {
       player.pause();
       await player.seekTo(0);
       if (!mounted.current || !active.current || generation !== radioGeneration.current || enemyGeneration !== enemySoundGeneration.current || lifecycle !== lifecycleGeneration.current || pools.current[key] !== pool) return false;
-      player.play();
-      setError(null);
-      return true;
+       const playbackProgress = waitForAudioPlaybackProgress(player);
+       player.play();
+       const progressed = await playbackProgress;
+       if (!progressed || !mounted.current || !active.current || generation !== radioGeneration.current || enemyGeneration !== enemySoundGeneration.current || lifecycle !== lifecycleGeneration.current || pools.current[key] !== pool) return false;
+       setError(null);
+       return true;
     } catch {
       if (mounted.current && generation === radioGeneration.current) setError('Telsiz sesi oynatılamadı.');
       return false;

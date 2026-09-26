@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Feather } from '@expo/vector-icons';
-import { FlatList, Image, Modal, Pressable, SectionList, StyleSheet, Text, TextInput, View } from 'react-native';
+import { AccessibilityInfo, FlatList, Image, Modal, Pressable, SectionList, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useColors } from '@/hooks/useColors';
 import { useI18n } from '@/hooks/useI18n';
 import { useGame } from '@/context/GameContext';
@@ -49,10 +49,16 @@ export default function WeaponCatalogList({ selectedWeapon, onSelect, compact = 
   const [pendingWeapon, setPendingWeapon] = useState<WeaponId | null>(null);
   const [gateVisible, setGateVisible] = useState(false);
   const [notice, setNotice] = useState('');
+  const [selectionFeedback, setSelectionFeedback] = useState('');
+  const selectionFeedbackTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingAction = useMemo(
     () => pendingWeapon ? ({ type: 'weapon', weaponId: pendingWeapon } as const) : 'soloEntry' as const,
     [pendingWeapon],
   );
+
+  React.useEffect(() => () => {
+    if (selectionFeedbackTimer.current) clearTimeout(selectionFeedbackTimer.current);
+  }, []);
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase(locale);
@@ -76,15 +82,27 @@ export default function WeaponCatalogList({ selectedWeapon, onSelect, compact = 
     setNotice('');
   };
 
+  const confirmSelection = (weapon: Weapon) => {
+    const feedback = locale === 'tr' ? `${weapon.name} seçildi` : `${weapon.name} selected`;
+    onSelect(weapon.id);
+    setSelectionFeedback(feedback);
+    AccessibilityInfo.announceForAccessibility(feedback);
+    if (selectionFeedbackTimer.current) clearTimeout(selectionFeedbackTimer.current);
+    selectionFeedbackTimer.current = setTimeout(() => {
+      setSelectionFeedback('');
+      selectionFeedbackTimer.current = null;
+    }, 1400);
+  };
+
   const chooseWeapon = (weapon: Weapon) => {
     if (isWeaponUnlocked(weapon.id)) {
-      onSelect(weapon.id);
+      confirmSelection(weapon);
       return;
     }
     if (activeGold || creditCents >= PRO_WEAPON_UNLOCK_COST_CENTS) {
       const result = unlockWeaponWithCredits(weapon.id);
       if (result.ok) {
-        onSelect(weapon.id);
+        confirmSelection(weapon);
         return;
       }
       setNotice(result.message);
@@ -100,17 +118,20 @@ export default function WeaponCatalogList({ selectedWeapon, onSelect, compact = 
   const renderItem = ({ item }: { item: Weapon }) => {
     const unlocked = isWeaponUnlocked(item.id);
     const selected = selectedWeapon === item.id && unlocked;
+    const selectedCopy = locale === 'tr' ? 'Seçildi' : 'Selected';
     return (
       <Pressable
         accessibilityRole="radio"
         accessibilityState={{ checked: selected, disabled: !unlocked }}
-        accessibilityLabel={`${item.name} · ${unlocked ? t('continue') : t('waiting')}`}
+        accessibilityLabel={`${item.name} · ${selected ? selectedCopy : unlocked ? t('continue') : t('waiting')}`}
+        testID={`weapon-option-${item.id}`}
         onPress={() => chooseWeapon(item)}
         style={[
           s.card,
           compact && s.cardCompact,
           !unlocked && s.lockedCard,
-          { backgroundColor: c.card, borderColor: c.border },
+          selected && s.selectedCard,
+          { backgroundColor: selected ? c.secondary : c.card, borderColor: selected ? c.cyan : c.border },
         ]}
       >
         <View style={s.thumbnailFrame}>
@@ -127,6 +148,12 @@ export default function WeaponCatalogList({ selectedWeapon, onSelect, compact = 
           </Text>
            {!unlocked && <Text style={[s.lockCopy, { color: c.mutedForeground }]}>{PRO_WEAPON_AD_UNLOCKS_REQUIRED} · {economyText(locale, 'economyAdValue')} · {t('adSimulation')}</Text>}
         </View>
+        {selected ? (
+          <View style={s.selectedMarker}>
+            <Feather name="check-circle" size={18} color={c.cyan} />
+            <Text style={[s.selectedText, { color: c.cyan }]}>{locale === 'tr' ? 'SEÇİLİ' : 'SELECTED'}</Text>
+          </View>
+        ) : null}
         {!unlocked && <Feather name="lock" size={21} color={c.amber} />}
       </Pressable>
     );
@@ -160,8 +187,13 @@ export default function WeaponCatalogList({ selectedWeapon, onSelect, compact = 
         style={s.filters}
         contentContainerStyle={s.filterContent}
       />
-       <Text style={[s.count, { color: c.mutedForeground }]}>{filtered.length} / {WEAPONS.length} · {t('equipmentSelection')}</Text>
+       {selectionFeedback ? (
+         <Text accessibilityLiveRegion="polite" style={[s.selectionFeedback, { color: c.cyan }]}>{selectionFeedback}</Text>
+       ) : (
+         <Text style={[s.count, { color: c.mutedForeground }]}>{filtered.length} / {WEAPONS.length} · {t('equipmentSelection')}</Text>
+       )}
       <SectionList
+         style={s.catalogList}
         sections={sections}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
@@ -194,8 +226,9 @@ export default function WeaponCatalogList({ selectedWeapon, onSelect, compact = 
            title={WEAPONS.find((weapon) => weapon.id === pendingWeapon)?.name ?? t('equipmentSelection')}
            body={economyText(locale, 'economyUnlock')}
            onApproved={() => true}
-           onComplete={() => {
-             onSelect(pendingWeapon);
+            onComplete={() => {
+              const weapon = WEAPONS.find((item) => item.id === pendingWeapon);
+              if (weapon) confirmSelection(weapon);
              closeUnlock();
            }}
            onCancel={() => setGateVisible(false)}
@@ -254,6 +287,7 @@ function ModalUnlock({
 
 const s = StyleSheet.create({
   root: { flex: 1, minHeight: 0 },
+  catalogList: { flex: 1, minHeight: 0 },
   rtl: rtlLayout,
   search: { minHeight: 48, borderWidth: 1, borderRadius: 14, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 10 },
   input: { flex: 1, minWidth: 0, fontSize: 15, paddingVertical: 10 },
@@ -263,12 +297,16 @@ const s = StyleSheet.create({
   chip: { borderWidth: 1, borderRadius: 18, paddingHorizontal: 12, height: 34, justifyContent: 'center' },
   chipText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.4 },
   count: { fontSize: 11, fontWeight: '700', marginVertical: 10, letterSpacing: 0.5 },
+  selectionFeedback: { minHeight: 30, textAlignVertical: 'center', fontSize: 12, fontWeight: '900', letterSpacing: 0.7 },
   list: { gap: 9, paddingBottom: 18 },
   sectionHeader: { paddingVertical: 8 },
   sectionTitle: { fontSize: 11, fontWeight: '900', letterSpacing: 0.7 },
   card: { minHeight: 98, borderWidth: 1, borderRadius: 16, padding: 10, flexDirection: 'row', alignItems: 'center', gap: 10 },
   cardCompact: { minHeight: 82, paddingVertical: 7 },
   lockedCard: { opacity: 0.82 },
+  selectedCard: { borderWidth: 2 },
+  selectedMarker: { alignItems: 'center', justifyContent: 'center', gap: 4, minWidth: 53 },
+  selectedText: { fontSize: 8, fontWeight: '900', letterSpacing: 0.4 },
   thumbnailFrame: { width: 96, height: 68, borderRadius: 11, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,.055)' },
   thumbnail: { width: '100%', height: '100%' },
   thumbnailLock: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,.48)' },

@@ -11,14 +11,14 @@ import { useWeaponAudio } from '@/hooks/useWeaponAudio';
 import { useMenuAudio } from '@/hooks/useMenuAudio';
 import { getWeapon, getWeaponAmmoLabel, getWeaponFireLabel, type WeaponId } from '@/lib/weapons';
 import { economyText } from '@/lib/economy-ui';
-import { addImpact, updateImpacts, type TrackedImpact } from '@/lib/impact-tracker';
+import { addImpact, type TrackedImpact } from '@/lib/impact-tracker';
+import { PausableTimers } from '@/lib/pausable-timers';
 import { impactForWeapon, projectileFlightMs } from '@/lib/weapon-impact';
-import { advanceEnemyCombat, hideEnemy, hitMedkitDrop, hitPeekingEnemy, scheduleEnemyAppearance, startEnemyRound, type EnemyCombat, type EnemyVariant } from '@/lib/enemy-combat';
+import { advanceEnemyCombat, hideEnemy, hitMedkitDrop, hitPeekingEnemy, scheduleEnemyAppearance, shiftEnemyCombatTime, squadGrenadeSuggestion, startEnemyRound, type EnemyCombat, type EnemyVariant } from '@/lib/enemy-combat';
 import { heldShotIntervalMs } from '@/lib/automatic-fire';
 import { effectiveScopeZoom } from '@/lib/scope-zoom';
-import { recognizeAtSight } from '@/lib/vision-recognition';
 import LiveBattleCamera from './LiveBattleCamera';
-import type { CameraFrame, CameraStatus } from './camera-types';
+import type { CameraStatus } from './camera-types';
 import ImpactEffects from './ImpactEffects';
 import EnemyOverlay from './EnemyOverlay';
 import AimTouchLayer from './AimTouchLayer';
@@ -42,6 +42,11 @@ const THREAT_LABELS: Record<EnemyVariant, { tr: string; en: string }> = {
   tank: { tr: 'TANK · MERKEZ GEÇİŞİ', en: 'TANK · CENTER CROSSING' },
   jet: { tr: 'SAVAŞ UÇAĞI · HAVA DESTEĞİ', en: 'FIGHTER JET · AIR SUPPORT' },
   sidecar: { tr: 'SEPETLİ MOTOSİKLET · YOL GEÇİŞİ', en: 'SIDECAR MOTORCYCLE · ROAD CROSSING' },
+  'mortar-team': { tr: 'HAVAN EKİBİ KURULUYOR', en: 'MORTAR CREW DEPLOYING' },
+  'machinegun-team': { tr: 'MAKİNELİ TÜFEK EKİBİ', en: 'MACHINE-GUN CREW DEPLOYING' },
+  squad: { tr: '10 KİŞİLİK DÜŞMAN TAKIMI', en: '10-PERSON ENEMY SQUAD' },
+  laser: { tr: 'LAZERLİ ASKER', en: 'LASER SOLDIER' },
+  robot: { tr: 'SAVAŞ ROBOTU', en: 'COMBAT ROBOT' },
 };
 
 export default function BattleScreen({ onExit }: Props) {
@@ -61,9 +66,6 @@ export default function BattleScreen({ onExit }: Props) {
   const [facing, setFacing] = useState<'front' | 'back'>('back');
   const [torchOn, setTorchOn] = useState(false);
   const [flashNotice, setFlashNotice] = useState('');
-  const [aiEnabled, setAiEnabled] = useState(false);
-  const [aiConsentVisible, setAiConsentVisible] = useState(false);
-  const [aiStatus, setAiStatus] = useState('');
   const [impacts, setImpacts] = useState<TrackedImpact[]>([]);
   const [projectileTarget, setProjectileTarget] = useState({ x: 0, y: 0 });
   const [fireSignal, setFireSignal] = useState(0);
@@ -80,26 +82,27 @@ export default function BattleScreen({ onExit }: Props) {
   const [refillVisible, setRefillVisible] = useState(false);
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
   const holdTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reloadTimerRef = useRef(new PausableTimers());
   const ammoRef = useRef(savedAmmo);
   const magazineRef = useRef(new Map<WeaponId, { ammo: number; reserve: number }>());
   const previousWeaponRef = useRef<WeaponId>(selectedWeapon);
   const lastFireRef = useRef(0);
   const fireRef = useRef<() => void>(() => undefined);
   const aimPointRef = useRef({ x: 0, y: 0 });
-  const frameRef = useRef<{ frame: CameraFrame; at: number } | null>(null);
   const impactsRef = useRef<TrackedImpact[]>([]);
   const impactIdRef = useRef(0);
   const lastImpactAtRef = useRef(0);
-  const lastAIAtRef = useRef(0);
-  const aiGenerationRef = useRef(0);
   const impactGenerationRef = useRef(0);
-  const impactTimersRef = useRef(new Set<ReturnType<typeof setTimeout>>());
+  const impactTimersRef = useRef(new PausableTimers());
+  const defeatTimerRef = useRef(new PausableTimers());
+  const defeatScheduledRef = useRef(false);
+  const restartRoundRef = useRef<() => void>(() => undefined);
   const enemyCombatRef = useRef<EnemyCombat>(enemyCombat);
   const lastEnemyShotRef = useRef(0);
   const lastEnemyWarningRef = useRef(0);
   const lastEnemyEntranceRef = useRef(0);
   const lastHealthRef = useRef(enemyCombat.health);
+  const pickerPauseAtRef = useRef<number | null>(null);
   const damageAnim = useRef(new Animated.Value(0)).current;
   const aimAnim = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const fireAnim = useRef(new Animated.Value(0)).current;
@@ -110,20 +113,9 @@ export default function BattleScreen({ onExit }: Props) {
   const weapon = getWeapon(selectedWeapon);
   const scopedZoom = effectiveScopeZoom(weapon.zoom);
   const cameraOrEnemyReady = status.state === 'live' || status.state === 'blocked' || status.state === 'error' || status.state === 'unsupported';
-  const combatReady = cameraOrEnemyReady && appActive && !isReloading && !pickerVisible && !aiConsentVisible && !refillVisible && (!enemyEnabled || enemyCombat.health > 0);
-  const showEnemyOverlay = enemyEnabled && cameraOrEnemyReady && appActive && !pickerVisible && !aiConsentVisible && !refillVisible;
+  const combatReady = cameraOrEnemyReady && appActive && !isReloading && !pickerVisible && !refillVisible && (!enemyEnabled || enemyCombat.health > 0);
+  const showEnemyOverlay = enemyEnabled && cameraOrEnemyReady && appActive && !refillVisible;
   ammoRef.current = ammo;
-
-  const onCameraFrame = useCallback((frame: CameraFrame) => {
-    const now = Date.now();
-    // Timestamp at shutter start, not JPEG decode completion. A slow still
-    // capture must not be mistaken for a fresh scene template for hit markers.
-    frameRef.current = { frame, at: frame.capturedAt ?? now };
-    if (!impactsRef.current.length) return;
-    const updated = updateImpacts(impactsRef.current, frame, now);
-    impactsRef.current = updated;
-    setImpacts(updated);
-  }, []);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -142,24 +134,24 @@ export default function BattleScreen({ onExit }: Props) {
   }, []);
 
   useEffect(() => {
-    if (!enemyEnabled || !cameraOrEnemyReady || !appActive || pickerVisible || aiConsentVisible || refillVisible || enemyCombat.health === 0) return;
+    if (!enemyEnabled || !cameraOrEnemyReady || !appActive || pickerVisible || refillVisible || enemyCombat.health === 0) return;
     const timer = setInterval(() => {
       const previous = enemyCombatRef.current;
       const next = advanceEnemyCombat(previous, Date.now(), Math.random());
       if (next !== previous) updateEnemyCombat(next);
     }, 100);
     return () => clearInterval(timer);
-  }, [aiConsentVisible, appActive, cameraOrEnemyReady, enemyCombat.health, enemyEnabled, pickerVisible, refillVisible, updateEnemyCombat]);
+  }, [appActive, cameraOrEnemyReady, enemyCombat.health, enemyEnabled, pickerVisible, refillVisible, updateEnemyCombat]);
 
   useEffect(() => {
-    if (cameraOrEnemyReady && appActive && enemyEnabled && !pickerVisible && !aiConsentVisible && !refillVisible) return;
+    if (cameraOrEnemyReady && appActive && enemyEnabled && !refillVisible) return;
     audioRef.current.stopEnemyCombatAudio();
     const next = hideEnemy(enemyCombatRef.current, Date.now());
     if (next !== enemyCombatRef.current) updateEnemyCombat(next);
-  }, [aiConsentVisible, appActive, cameraOrEnemyReady, enemyEnabled, pickerVisible, refillVisible, updateEnemyCombat]);
+  }, [appActive, cameraOrEnemyReady, enemyEnabled, refillVisible, updateEnemyCombat]);
 
   useEffect(() => {
-    if (!enemyEnabled || !appActive || pickerVisible || aiConsentVisible || refillVisible || warningId === undefined) {
+    if (!enemyEnabled || !appActive || pickerVisible || refillVisible || warningId === undefined) {
       audioRef.current.stopEnemyWarning();
       return;
     }
@@ -188,7 +180,7 @@ export default function BattleScreen({ onExit }: Props) {
       clearTimeout(timeout);
       audioRef.current.stopEnemyWarning();
     };
-  }, [aiConsentVisible, appActive, enemyEnabled, pickerVisible, refillVisible, updateEnemyCombat, warningId]);
+  }, [appActive, enemyEnabled, pickerVisible, refillVisible, updateEnemyCombat, warningId]);
 
   useEffect(() => {
     const visitor = enemyCombat.enemy;
@@ -226,6 +218,10 @@ export default function BattleScreen({ onExit }: Props) {
   useEffect(() => {
     const previous = previousWeaponRef.current;
     if (previous !== selectedWeapon) {
+      reloadTimerRef.current.cancelAll();
+      setIsReloading(false);
+      reloadAnim.stopAnimation();
+      reloadAnim.setValue(0);
       if (holdTimer.current) clearInterval(holdTimer.current);
       holdTimer.current = null;
       setIsFiring(false);
@@ -235,6 +231,7 @@ export default function BattleScreen({ onExit }: Props) {
     audio.prepareWeapon(selectedWeapon);
     const next = getWeapon(selectedWeapon);
     const saved = magazineRef.current.get(selectedWeapon) ?? { ammo: next.capacity, reserve: 2 };
+    ammoRef.current = saved.ammo;
     setAmmo(saved.ammo);
     setSpareMagazines(saved.reserve);
     setScopeActive(false);
@@ -242,12 +239,11 @@ export default function BattleScreen({ onExit }: Props) {
   }, [selectedWeapon]);
 
   useEffect(() => () => {
-    aiGenerationRef.current += 1;
     impactGenerationRef.current += 1;
-    impactTimersRef.current.forEach(clearTimeout);
-    impactTimersRef.current.clear();
+    impactTimersRef.current.cancelAll();
+    defeatTimerRef.current.cancelAll();
+    reloadTimerRef.current.cancelAll();
     if (holdTimer.current) clearInterval(holdTimer.current);
-    if (reloadTimer.current) clearTimeout(reloadTimer.current);
   }, []);
 
   const fire = useCallback(() => {
@@ -291,8 +287,6 @@ export default function BattleScreen({ onExit }: Props) {
       lastImpactAtRef.current = now;
       const id = ++impactIdRef.current;
       const kind = impactForWeapon(weapon);
-      const recent = frameRef.current;
-      const frame = recent && now - recent.at < 1800 ? recent.frame : null;
       const point = {
         x: (width / 2 + aimPointRef.current.x) / Math.max(1, width),
         y: (height / 2 + aimPointRef.current.y) / Math.max(1, height),
@@ -300,44 +294,18 @@ export default function BattleScreen({ onExit }: Props) {
       const placeImpact = () => {
         if (flightMs > 0) hitEnemy(Date.now());
         const arrivedAt = Date.now();
-        const arrivalFrame = frameRef.current;
-        const image = arrivalFrame && arrivedAt - arrivalFrame.at < 1800 ? arrivalFrame.frame : null;
-        const updated = addImpact(impactsRef.current, image, point, kind, id, arrivedAt);
+        // Brief screen-space feedback only: no camera-frame sampling and no
+        // long-lived burn attached to where the camera used to point.
+        const updated = addImpact(impactsRef.current, null, point, kind, id, arrivedAt);
         impactsRef.current = updated;
         setImpacts(updated);
-        if (!updated.at(-1)?.patch && status.state === 'live') {
-          setFlashNotice(locale === 'tr'
-            ? 'Hedef izlenemedi; efekt kısa süreli gösteriliyor.'
-            : 'Target could not be tracked; brief effect only.');
-        } else {
-          setFlashNotice('');
-        }
       };
       if (flightMs > 0) {
         const generation = impactGenerationRef.current;
-        const timer = setTimeout(() => {
-          impactTimersRef.current.delete(timer);
+        impactTimersRef.current.add(() => {
           if (generation === impactGenerationRef.current) placeImpact();
         }, flightMs);
-        impactTimersRef.current.add(timer);
       } else placeImpact();
-      if (aiEnabled && frame && now - lastAIAtRef.current >= 10_000) {
-        lastAIAtRef.current = now;
-        const generation = aiGenerationRef.current;
-        setAiStatus(locale === 'tr' ? 'AI hedefi inceliyor…' : 'AI checking target…');
-        void recognizeAtSight(frame, point).then((result) => {
-          if (generation !== aiGenerationRef.current) return;
-          if (result.confidence < 0.6 || result.category === 'none') {
-            setAiStatus(locale === 'tr' ? 'AI: Hedef tanınamadı' : 'AI: Target not identified');
-            return;
-          }
-          setAiStatus(`${locale === 'tr' ? 'AI tanıdı' : 'AI recognized'}: ${result.category}`);
-        }).catch(() => {
-          if (generation === aiGenerationRef.current) {
-            setAiStatus(locale === 'tr' ? 'AI bağlantısı kurulamadı; yerel takip sürüyor.' : 'AI unavailable; local tracking continues.');
-          }
-        });
-      }
     }
     const throwable = weapon.archetype === 'grenade' || weapon.archetype === 'launcher' || weapon.id === 'knife';
     if (throwable) {
@@ -354,7 +322,7 @@ export default function BattleScreen({ onExit }: Props) {
       Animated.timing(recoilAnim, { toValue: 0, duration: 180, useNativeDriver: true }),
     ]).start();
     audio.playShot(selectedWeapon);
-  }, [activeGold, aiEnabled, audio, combatReady, enemyEnabled, fireAnim, height, knifeThrowAnim, locale, recoilAnim, selectedWeapon, status.state, updateEnemyCombat, weapon, weapon.archetype, weapon.id, weapon.interval, width]);
+  }, [activeGold, audio, combatReady, enemyEnabled, fireAnim, height, knifeThrowAnim, recoilAnim, selectedWeapon, updateEnemyCombat, weapon, weapon.archetype, weapon.id, weapon.interval, width]);
   fireRef.current = fire;
 
   const reload = useCallback(() => {
@@ -364,10 +332,9 @@ export default function BattleScreen({ onExit }: Props) {
     holdTimer.current = null;
     setIsReloading(true);
     if (!activeGold) setSpareMagazines((value) => Math.max(0, value - 1));
-    if (reloadTimer.current) clearTimeout(reloadTimer.current);
-    reloadTimer.current = setTimeout(() => {
+    reloadTimerRef.current.cancelAll();
+    reloadTimerRef.current.add(() => {
       setIsReloading(false);
-      reloadTimer.current = null;
       ammoRef.current = weapon.capacity;
       setAmmo(weapon.capacity);
     }, 1500);
@@ -390,11 +357,32 @@ export default function BattleScreen({ onExit }: Props) {
     holdTimer.current = null;
   }, []);
   useEffect(() => {
+    if (pickerVisible || !appActive) reloadTimerRef.current.pause();
+    else reloadTimerRef.current.resume();
+    if (pickerVisible) {
+      if (pickerPauseAtRef.current === null) pickerPauseAtRef.current = Date.now();
+      stopFire();
+      audioRef.current.stopEnemyCombatAudio();
+      // A pending radio cue must restart on resume, or an unscheduled
+      // warning can remain on screen forever after its sound was cancelled.
+      if (enemyCombatRef.current.warning?.appearsAt === null) lastEnemyWarningRef.current = 0;
+      impactTimersRef.current.pause();
+      return;
+    }
+    const pausedAt = pickerPauseAtRef.current;
+    if (pausedAt === null) return;
+    pickerPauseAtRef.current = null;
+    const shifted = shiftEnemyCombatTime(enemyCombatRef.current, Date.now() - pausedAt);
+    if (shifted !== enemyCombatRef.current) updateEnemyCombat(shifted);
+    impactTimersRef.current.resume();
+    if (enemyEnabled && shifted.enemy?.variant === 'cobra') audioRef.current.playEnemyEntrance('cobra');
+  }, [appActive, pickerVisible, enemyEnabled, stopFire, updateEnemyCombat]);
+  useEffect(() => {
     if (enemyEnabled && enemyCombat.health === 0) stopFire();
   }, [enemyCombat.health, enemyEnabled, stopFire]);
   useEffect(() => {
-    if (pickerVisible || aiConsentVisible || refillVisible) stopFire();
-  }, [aiConsentVisible, pickerVisible, refillVisible, stopFire]);
+    if (pickerVisible || refillVisible) stopFire();
+  }, [pickerVisible, refillVisible, stopFire]);
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (next) => {
       const active = next === 'active';
@@ -403,8 +391,7 @@ export default function BattleScreen({ onExit }: Props) {
         stopFire();
         setTorchOn(false);
         impactGenerationRef.current += 1;
-        impactTimersRef.current.forEach(clearTimeout);
-        impactTimersRef.current.clear();
+        impactTimersRef.current.cancelAll();
       }
     });
     return () => subscription.remove();
@@ -415,12 +402,8 @@ export default function BattleScreen({ onExit }: Props) {
     stopFire();
     setTorchOn(false);
     setFlashNotice('');
-    aiGenerationRef.current += 1;
     impactGenerationRef.current += 1;
-    impactTimersRef.current.forEach(clearTimeout);
-    impactTimersRef.current.clear();
-    setAiStatus('');
-    frameRef.current = null;
+    impactTimersRef.current.cancelAll();
     impactsRef.current = [];
     setImpacts([]);
     setStatus({ state: 'requesting', message: `${cameraFacingLabel(locale, next)} · ${t('waiting')}` });
@@ -442,6 +425,8 @@ export default function BattleScreen({ onExit }: Props) {
 
   const resetEnemies = () => {
     stopFire();
+    defeatTimerRef.current.cancelAll();
+    defeatScheduledRef.current = false;
     audio.stopEnemyCombatAudio();
     lastEnemyShotRef.current = 0;
     lastEnemyWarningRef.current = 0;
@@ -449,8 +434,7 @@ export default function BattleScreen({ onExit }: Props) {
     updateEnemyCombat(startEnemyRound(Date.now()));
   };
   const restartEnemyRound = () => {
-    if (reloadTimer.current) clearTimeout(reloadTimer.current);
-    reloadTimer.current = null;
+    reloadTimerRef.current.cancelAll();
     setIsReloading(false);
     reloadAnim.setValue(0);
     ammoRef.current = weapon.capacity;
@@ -459,11 +443,20 @@ export default function BattleScreen({ onExit }: Props) {
     magazineRef.current.set(selectedWeapon, { ammo: weapon.capacity, reserve: 2 });
     resetEnemies();
   };
+  restartRoundRef.current = restartEnemyRound;
   useEffect(() => {
-    if (!enemyEnabled || enemyCombat.health !== 0 || !appActive) return;
-    const timer = setTimeout(() => restartEnemyRound(), 5000);
-    return () => clearTimeout(timer);
-  }, [appActive, enemyCombat.health, enemyEnabled]);
+    if (!enemyEnabled || enemyCombat.health !== 0) {
+      defeatTimerRef.current.cancelAll();
+      defeatScheduledRef.current = false;
+      return;
+    }
+    if (!defeatScheduledRef.current) {
+      defeatScheduledRef.current = true;
+      defeatTimerRef.current.add(() => restartRoundRef.current(), 5000);
+    }
+    if (pickerVisible || !appActive) defeatTimerRef.current.pause();
+    else defeatTimerRef.current.resume();
+  }, [appActive, enemyCombat.health, enemyEnabled, pickerVisible]);
   const toggleEnemies = () => {
     stopFire();
     if (enemyEnabled) {
@@ -482,7 +475,9 @@ export default function BattleScreen({ onExit }: Props) {
   const warningCopy = enemyEnabled && enemyCombat.warning
     ? `${silentWarningId === warningId ? (locale === 'tr' ? 'TELSİZ SESSİZ' : 'RADIO UNAVAILABLE') : (locale === 'tr' ? 'TELSİZ' : 'RADIO')} · ${THREAT_LABELS[enemyCombat.warning.variant][locale === 'tr' ? 'tr' : 'en']}`
     : '';
-  const topMessage = flashNotice || aiStatus || audio.error || battleMusic.error
+  const topMessage = flashNotice || audio.error || battleMusic.error
+    || (showEnemyOverlay && enemyCombat.enemy?.variant === 'squad'
+      ? squadGrenadeSuggestion(locale === 'tr' ? 'tr' : 'en') : '')
     || (showEnemyOverlay && enemyCombat.medkit ? (locale === 'tr' ? 'İLK YARDIM · VUR, +1 CAN' : 'FIRST AID · SHOOT FOR +1 HP') : '')
     || warningCopy || status.message;
   const isTopAlert = topMessage !== status.message || status.state !== 'live';
@@ -498,7 +493,6 @@ export default function BattleScreen({ onExit }: Props) {
       }]}>
         <LiveBattleCamera
           key={`${facing}-${restartKey}`}
-          onFrame={appActive ? onCameraFrame : undefined}
           onStatus={(next) => {
             if (next.state !== 'live') setTorchOn(false);
             setStatus(next);
@@ -509,8 +503,8 @@ export default function BattleScreen({ onExit }: Props) {
           flashlightEnabled={flashlightEnabled}
           torchOn={torchOn}
         />
-        <ImpactEffects impacts={status.state === 'live' ? impacts : []} width={width} height={height} />
       </Animated.View>
+      <ImpactEffects impacts={status.state === 'live' ? impacts : []} width={width} height={height} />
       <VisionModeOverlay mode={visionMode} />
        <EnemyOverlay
           enemy={showEnemyOverlay ? enemyCombat.enemy : null}
@@ -518,7 +512,7 @@ export default function BattleScreen({ onExit }: Props) {
           medkit={showEnemyOverlay ? enemyCombat.medkit : null}
           death={showEnemyOverlay ? enemyCombat.death : null}
           lastAttack={showEnemyOverlay ? enemyCombat.lastAttack : null}
-         width={width} height={height}
+         width={width} height={height} paused={pickerVisible}
        />
       <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.damageWash, { opacity: damageAnim }]} />
       <AimTouchLayer onAim={(x, y) => { aimPointRef.current = { x, y }; aimAnim.setValue({ x, y }); }} />
@@ -537,7 +531,7 @@ export default function BattleScreen({ onExit }: Props) {
         isAiming={scopeActive}
       />
        <View style={[styles.topBar, { top: insets.top + 4 }]} pointerEvents="box-none">
-        <Pressable onPress={() => { stopFire(); setTorchOn(false); if (reloadTimer.current) clearTimeout(reloadTimer.current); setIsReloading(false); onExit(); }} style={styles.iconButton} accessibilityLabel={t('close')}>
+        <Pressable onPress={() => { stopFire(); setTorchOn(false); reloadTimerRef.current.cancelAll(); setIsReloading(false); onExit(); }} style={styles.iconButton} accessibilityLabel={t('close')}>
            <Feather name={rtl ? 'arrow-right' : 'arrow-left'} size={19} color={colors.foreground} />
         </Pressable>
         <View style={styles.statusCopy}>
@@ -554,7 +548,7 @@ export default function BattleScreen({ onExit }: Props) {
          <Pressable testID="battle-music-toggle" accessibilityRole="switch" accessibilityState={{ checked: musicEnabled }} accessibilityLabel={locale === 'tr' ? `Müzik ${musicEnabled ? 'açık' : 'kapalı'}` : `Music ${musicEnabled ? 'on' : 'off'}`} onPress={() => setAudioPreferences({ musicEnabled: !musicEnabled })} style={[styles.iconButton, { borderColor: musicEnabled ? colors.cyan : colors.border }]}>
            <Feather name={musicEnabled ? 'music' : 'volume-x'} size={17} color={musicEnabled ? colors.cyan : colors.foreground} />
          </Pressable>
-         <Pressable onPress={() => { resetEnemies(); setTorchOn(false); setFlashNotice(''); impactGenerationRef.current += 1; impactTimersRef.current.forEach(clearTimeout); impactTimersRef.current.clear(); frameRef.current = null; impactsRef.current = []; setImpacts([]); setRestartKey((value) => value + 1); }} style={styles.iconButton} accessibilityLabel={t('tryAgain')}>
+          <Pressable onPress={() => { resetEnemies(); setTorchOn(false); setFlashNotice(''); impactGenerationRef.current += 1; impactTimersRef.current.cancelAll(); impactsRef.current = []; setImpacts([]); setRestartKey((value) => value + 1); }} style={styles.iconButton} accessibilityLabel={t('tryAgain')}>
           <Feather name="refresh-cw" size={19} color={colors.foreground} />
         </Pressable>
       </View>
@@ -586,27 +580,6 @@ export default function BattleScreen({ onExit }: Props) {
           <Feather name={torchOn ? 'zap' : 'zap-off'} size={16} color={torchOn ? colors.amber : colors.foreground} />
           <Text numberOfLines={1} style={[styles.cameraControlText, { color: torchOn ? colors.amber : colors.foreground }]}>
             {torchOn ? t('flashlightOn') : t('flashlightOff')}
-          </Text>
-        </Pressable>
-        <Pressable
-          testID="camera-ai-button"
-          accessibilityRole="button"
-          accessibilityLabel={aiEnabled ? (locale === 'tr' ? 'AI tanıma açık' : 'AI recognition on') : (locale === 'tr' ? 'AI tanıma kapalı' : 'AI recognition off')}
-          accessibilityState={{ selected: aiEnabled }}
-          onPress={() => {
-            if (aiEnabled) {
-              aiGenerationRef.current += 1;
-              setAiEnabled(false);
-              setAiStatus('');
-            } else {
-              setAiConsentVisible(true);
-            }
-          }}
-          style={[styles.cameraControl, { borderColor: aiEnabled ? colors.cyan : colors.border }]}
-        >
-          <Feather name="aperture" size={16} color={aiEnabled ? colors.cyan : colors.foreground} />
-          <Text numberOfLines={1} style={[styles.cameraControlText, { color: aiEnabled ? colors.cyan : colors.foreground }]}>
-            {aiEnabled ? (locale === 'tr' ? 'AI Açık' : 'AI On') : (locale === 'tr' ? 'AI Kapalı' : 'AI Off')}
           </Text>
         </Pressable>
       </View>
@@ -662,40 +635,22 @@ export default function BattleScreen({ onExit }: Props) {
           </Pressable>
         </View>
       )}
-      <Modal visible={aiConsentVisible} transparent animationType="fade" onRequestClose={() => setAiConsentVisible(false)}>
-        <View style={styles.aiConsentBackdrop}>
-          <View style={[styles.aiConsentCard, { backgroundColor: colors.background, borderColor: colors.border }]}>
-            <Text style={[styles.title, { color: colors.foreground }]}>
-              {locale === 'tr' ? 'İsteğe bağlı AI hedef tanıma' : 'Optional AI target recognition'}
-            </Text>
-            <Text style={[styles.aiConsentText, { color: colors.foreground }]}>
-              {locale === 'tr'
-                ? 'Açarsan en fazla 10 saniyede bir, atış anındaki küçültülmüş tek kamera karesi OpenAI servisine gönderilir. Sürekli video gönderilmez; bu uygulama kareleri saklamaz. Servisin kendi veri politikası geçerlidir ve kullanım ücreti doğabilir. Yerel efektler AI kapalıyken de çalışır.'
-                : 'If enabled, at most one reduced camera frame from a shot is sent to OpenAI every 10 seconds. No continuous video is sent and this app does not store frames. The provider’s data policy applies and usage may incur charges. Local effects also work with AI off.'}
-            </Text>
-            <View style={styles.aiConsentActions}>
-              <Pressable accessibilityRole="button" onPress={() => setAiConsentVisible(false)} style={styles.aiConsentAction}>
-                <Text style={{ color: colors.foreground }}>{locale === 'tr' ? 'Vazgeç' : 'Cancel'}</Text>
-              </Pressable>
-              <Pressable accessibilityRole="button" onPress={() => { setAiEnabled(true); setAiConsentVisible(false); }} style={[styles.aiConsentAction, { borderColor: colors.cyan }]}>
-                <Text style={{ color: colors.cyan }}>{locale === 'tr' ? 'AI tanımayı aç' : 'Enable AI'}</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
       <Modal visible={pickerVisible} transparent animationType="slide" onRequestClose={() => setPickerVisible(false)}>
         <View style={styles.modalBackdrop}>
           <View style={[styles.picker, { backgroundColor: colors.background, borderColor: colors.border }]}>
             <View style={styles.pickerHeader}>
-              <Text style={[styles.title, { color: colors.foreground }]}>{t('equipmentSelection')}</Text>
+              <View>
+                <Text style={[styles.title, { color: colors.foreground }]}>{t('equipmentSelection')}</Text>
+                <Text style={[styles.topStatus, { color: colors.cyan }]}>
+                  {locale === 'tr' ? 'OYUN DURAKLATILDI' : 'GAME PAUSED'}
+                </Text>
+              </View>
               <Pressable onPress={() => setPickerVisible(false)}><Feather name="x" size={22} color={colors.foreground} /></Pressable>
             </View>
             <WeaponCatalogList compact selectedWeapon={selectedWeapon} onSelect={(id: WeaponId) => {
               if (holdTimer.current) clearInterval(holdTimer.current);
               holdTimer.current = null;
-              if (reloadTimer.current) clearTimeout(reloadTimer.current);
-              reloadTimer.current = null;
+              reloadTimerRef.current.cancelAll();
               setIsReloading(false);
               setIsFiring(false);
               magazineRef.current.set(selectedWeapon, { ammo: ammoRef.current, reserve: spareMagazines });
@@ -740,11 +695,6 @@ const styles = StyleSheet.create({
   cameraControls: { position: 'absolute', left: 12, right: 12, flexDirection: 'row', gap: 5 },
   cameraControl: { flex: 1, minWidth: 0, minHeight: 44, paddingHorizontal: 4, borderWidth: 1, borderRadius: 9, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.75)' },
   cameraControlText: { fontSize: 9, fontWeight: '800', flexShrink: 1, textAlign: 'center' },
-  aiConsentBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 22 },
-  aiConsentCard: { width: '100%', borderWidth: 1, borderRadius: 16, padding: 20, gap: 14 },
-  aiConsentText: { fontSize: 14, lineHeight: 21 },
-  aiConsentActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10 },
-  aiConsentAction: { borderWidth: 1, borderColor: '#56606b', borderRadius: 9, paddingHorizontal: 13, paddingVertical: 10 },
   iconButton: { width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' },
   statusCopy: { flex: 1, minWidth: 0 },
   title: { fontSize: 15, fontWeight: '800', letterSpacing: 1 },
@@ -760,6 +710,6 @@ const styles = StyleSheet.create({
   loadingText: { fontSize: 12, textAlign: 'center' },
   scopeButton: { position: 'absolute', right: 18, bottom: 170, width: 44, height: 40, borderWidth: 1, borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-end' },
-  picker: { maxHeight: '82%', borderTopWidth: 1, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 16 },
+  picker: { height: '82%', maxHeight: '82%', borderTopWidth: 1, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 16 },
   pickerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
 });
